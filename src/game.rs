@@ -118,22 +118,20 @@ impl Game {
     }
     pub fn check_win(&self) -> Option<bool> {
         // win = Some(true), lose = Some(false), no decision = None
-        let mut bombs = 0;
-        let mut flagged_bombs = 0;
+        let num_safe_cells = (self.map.len() * self.map[0].len()) - self.num_bombs;
+        let mut num_revealed_safe_cells = 0;
         for row in self.map.iter() {
             for cell in row.iter() {
                 if cell.is_bomb {
-                    bombs += 1;
                     if cell.revealed {
                         return Some(false);
                     }
-                    if cell.flagged {
-                        flagged_bombs += 1;
-                    }
+                } else if cell.revealed {
+                    num_revealed_safe_cells += 1;
                 }
             }
         }
-        if bombs == flagged_bombs {
+        if num_safe_cells == num_revealed_safe_cells {
             return Some(true);
         } else {
             return None;

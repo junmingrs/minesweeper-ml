@@ -36,7 +36,7 @@ struct CellText;
 struct FlagsText;
 
 fn main() {
-    let game = Game::new(20, 10, 50);
+    let game = Game::new(20, 10, 20);
     App::new()
         .add_plugins(DefaultPlugins)
         .insert_resource(game)
