@@ -1,13 +1,14 @@
 use std::collections::VecDeque;
 
 use bevy::{
-    color::Color,
+    color::{Color, Srgba},
     ecs::{component::Component, resource::Resource},
     math::bool,
 };
 use rand::RngExt;
 
 const PALETTE: [Color; 2] = [Color::srgb_u8(170, 215, 81), Color::srgb_u8(142, 189, 53)];
+const BOMB_COLOR: Color = Color::srgb_u8(255, 50, 50);
 
 #[derive(Component)]
 pub struct Cell {
@@ -23,6 +24,9 @@ pub struct Cell {
 #[derive(Resource)]
 pub struct Game {
     pub map: Vec<Vec<Cell>>,
+    pub num_bombs: usize,
+    pub flags: usize,
+    pub win: bool,
 }
 
 const OFFSETS: [(i16, i16); 8] = [
@@ -37,7 +41,7 @@ const OFFSETS: [(i16, i16); 8] = [
 ];
 
 impl Game {
-    pub fn new(width: usize, height: usize, num_bombs: usize) -> Self {
+    pub fn new(height: usize, width: usize, num_bombs: usize) -> Self {
         let mut map: Vec<Vec<Cell>> = Vec::new();
         let mut rng = rand::rng();
         let mut bomb_locations: Vec<(usize, usize)> = Vec::new();
@@ -49,11 +53,17 @@ impl Game {
         for y in 0..height {
             let mut row = Vec::new();
             for x in 0..width {
-                let color = PALETTE[(x + y) % 2];
+                let color: Color;
+                let is_bomb = bomb_locations.clone().contains(&(x, y));
+                if is_bomb {
+                    color = BOMB_COLOR;
+                } else {
+                    color = PALETTE[(x + y) % 2];
+                }
                 row.push(Cell {
                     x,
                     y,
-                    is_bomb: bomb_locations.clone().contains(&(x, y)),
+                    is_bomb,
                     nearby_bombs: get_nearby_bombs(bomb_locations.clone(), (x, y)),
                     color,
                     revealed: false,
@@ -63,7 +73,12 @@ impl Game {
             map.push(row);
         }
 
-        Self { map }
+        Self {
+            map,
+            win: false,
+            num_bombs: bomb_locations.len(),
+            flags: bomb_locations.len(),
+        }
     }
     pub fn get_cell(&self, x: usize, y: usize) -> &Cell {
         &self.map[y][x]
@@ -99,6 +114,29 @@ impl Game {
                     None => continue,
                 }
             }
+        }
+    }
+    pub fn check_win(&self) -> Option<bool> {
+        // win = Some(true), lose = Some(false), no decision = None
+        let mut bombs = 0;
+        let mut flagged_bombs = 0;
+        for row in self.map.iter() {
+            for cell in row.iter() {
+                if cell.is_bomb {
+                    bombs += 1;
+                    if cell.revealed {
+                        return Some(false);
+                    }
+                    if cell.flagged {
+                        flagged_bombs += 1;
+                    }
+                }
+            }
+        }
+        if bombs == flagged_bombs {
+            return Some(true);
+        } else {
+            return None;
         }
     }
 }
