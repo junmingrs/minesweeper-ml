@@ -36,7 +36,7 @@ struct CellText;
 struct FlagsText;
 
 fn main() {
-    let game = Game::new(20, 10, 20);
+    let game = Game::new(20, 10, 50);
     App::new()
         .add_plugins(DefaultPlugins)
         .insert_resource(game)
@@ -82,7 +82,7 @@ fn setup(mut commands: Commands, game: Res<Game>) {
                         align_items: AlignItems::Center,
                         ..default()
                     },
-                    BackgroundColor(BOMB_COLOR.into()),
+                    BackgroundColor(FLAGGED_COLOR),
                     Button,
                 ))
                 .with_children(|builder| {
@@ -109,12 +109,12 @@ fn setup(mut commands: Commands, game: Res<Game>) {
                         align_items: AlignItems::Center,
                         ..default()
                     },
-                    BackgroundColor(BOMB_COLOR.into()),
+                    BackgroundColor(FLAGGED_COLOR),
                     Button,
                 ))
                 .with_children(|builder| {
                     builder.spawn((
-                        Text::new(format!("{}", game.flags)),
+                        Text::new(format!("Flags: {}", game.flags)),
                         TextFont {
                             font_size: 20.,
                             font_smoothing: bevy::text::FontSmoothing::AntiAliased,
@@ -137,7 +137,7 @@ fn item_rect(builder: &mut ChildSpawnerCommands, cell: &Cell) {
                 align_items: AlignItems::Center,
                 ..Default::default()
             },
-            BackgroundColor(cell.color.into()),
+            BackgroundColor(cell.color),
             Button,
             CellDisplay {
                 x: cell.x,
@@ -211,15 +211,24 @@ fn hover_system(
     mut game: ResMut<Game>,
 ) {
     for (interaction, cell_display) in &mut interaction_query {
-        if *interaction == Interaction::Hovered {
-            if keyboard_input.just_pressed(KeyCode::KeyF) {
+        if *interaction == Interaction::Hovered && keyboard_input.just_pressed(KeyCode::KeyF) {
+            let delta = {
+                let no_flags = game.flags == 0;
                 let cell = game.get_cell_mut(cell_display.x, cell_display.y);
-                cell.flagged = !cell.flagged;
-                if cell.flagged {
-                    game.flags -= 1;
+                if !cell.flagged && !no_flags {
+                    cell.flagged = true;
+                    -1
+                } else if cell.flagged {
+                    cell.flagged = false;
+                    1
                 } else {
-                    game.flags += 1;
+                    0
                 }
+            };
+            match delta {
+                -1 => game.flags -= 1,
+                1 => game.flags += 1,
+                _ => {}
             }
         }
     }

@@ -1,3 +1,4 @@
+use core::num;
 use std::collections::VecDeque;
 
 use bevy::{
@@ -45,10 +46,14 @@ impl Game {
         let mut map: Vec<Vec<Cell>> = Vec::new();
         let mut rng = rand::rng();
         let mut bomb_locations: Vec<(usize, usize)> = Vec::new();
-        for _ in 0..num_bombs {
-            let x = rng.random_range(0..9);
-            let y = rng.random_range(0..19);
-            bomb_locations.push((x, y));
+        let mut i = 0;
+        while i < num_bombs {
+            let x = rng.random_range(0..9_usize);
+            let y = rng.random_range(0..19_usize);
+            if !bomb_locations.contains(&(x, y)) {
+                bomb_locations.push((x, y));
+                i += 1;
+            }
         }
         for y in 0..height {
             let mut row = Vec::new();
@@ -117,25 +122,47 @@ impl Game {
         }
     }
     pub fn check_win(&self) -> Option<bool> {
-        // win = Some(true), lose = Some(false), no decision = None
+        let mut safe_opened = 0;
         let num_safe_cells = (self.map.len() * self.map[0].len()) - self.num_bombs;
-        let mut num_revealed_safe_cells = 0;
+        let mut not_safe_flagged = 0;
         for row in self.map.iter() {
             for cell in row.iter() {
-                if cell.is_bomb {
-                    if cell.revealed {
-                        return Some(false);
-                    }
-                } else if cell.revealed {
-                    num_revealed_safe_cells += 1;
+                if cell.is_bomb && cell.revealed {
+                    return Some(false); 
+                }
+                if !cell.is_bomb && cell.revealed {
+                    safe_opened += 1;
+                }
+                if cell.is_bomb && cell.flagged {
+                    not_safe_flagged += 1;
                 }
             }
         }
-        if num_safe_cells == num_revealed_safe_cells {
+        if (safe_opened == num_safe_cells) || (not_safe_flagged == self.num_bombs) {
             return Some(true);
-        } else {
-            return None;
         }
+        None
+    // TODO: something here
+    // win = Some(true), lose = Some(false), no decision = None
+    //     let num_safe_cells = (self.map.len() * self.map[0].len()) - self.num_bombs;
+    //     let mut num_revealed_safe_cells = 0;
+    //     for row in self.map.iter() {
+    //         for cell in row.iter() {
+    //             if cell.is_bomb {
+    //                 if cell.revealed {
+    //                     return Some(false);
+    //                 }
+    //             } else if cell.revealed {
+    //                 num_revealed_safe_cells += 1;
+    //             }
+    //         }
+    //     }
+    //     if num_safe_cells == num_revealed_safe_cells {
+    //         return Some(true);
+    //     } else {
+    //         return None;
+    //     }
+    // }
     }
 }
 
