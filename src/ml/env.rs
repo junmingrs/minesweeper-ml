@@ -54,10 +54,10 @@ impl Environment for Game {
         let outcome = self.apply_action(action);
 
         let (reward, done) = match outcome {
-            ActionOutcome::RevealCell => (0.05, false),
+            ActionOutcome::RevealCell(n) => (0.05 * n, false),
             ActionOutcome::FlagPlaced => (0.02, false),
-            ActionOutcome::FlagRemoved => (0.0, false),
-            ActionOutcome::Invalid => (-0.2, false),
+            ActionOutcome::FlagRemoved => (-0.1, false),
+            ActionOutcome::Invalid => (-0.5, false),
             ActionOutcome::HitBomb => (-1.0, true),
             ActionOutcome::Win => (2.0, true),
         };

@@ -1,14 +1,25 @@
+use std::{
+    sync::{
+        Mutex,
+        mpsc::{self, Receiver},
+    },
+    thread::spawn,
+};
+
 use bevy::{
     DefaultPlugins,
     app::{App, Startup},
     camera::Camera2d,
-    ecs::system::Commands,
 };
 
 use bevy::prelude::*;
-use burn::backend::{Autodiff, Cuda};
+use burn::serde::de;
 
-use crate::{game::Cell, ml::model::Model};
+use crate::{
+    game::Cell,
+    ml::model::{Model, save_model},
+    tui::{Command, Metric, run_tui},
+};
 
 mod game;
 mod ml;
@@ -37,20 +48,37 @@ struct CellText;
 #[derive(Component)]
 struct FlagsText;
 
-type Backend = Autodiff<Cuda>;
+#[derive(Resource)]
+struct CommandReceiver(pub Mutex<Receiver<Command>>);
 
 fn main() {
+    let (tx, rx) = mpsc::channel::<Metric>();
+    let (cmd_tx, cmd_rx) = mpsc::channel::<Command>();
+
+    spawn(move || {
+        run_tui(rx, cmd_tx).unwrap();
+    });
     App::new()
         .add_plugins(DefaultPlugins)
-        .insert_resource(Model::new())
+        .insert_resource(Model::new(tx))
+        .insert_resource(CommandReceiver(Mutex::new(cmd_rx)))
         .add_systems(Startup, setup)
         // .add_systems(Update, button_system)
         // .add_systems(Update, hover_system)
         .add_systems(Update, train_model)
         .add_systems(Update, update_cells)
         .add_systems(Update, update_flags)
+        .add_systems(Update, handle_commands)
         // .add_systems(PostUpdate, check_win)
         .run();
+}
+
+fn handle_commands(model: Res<Model>, cmd_rx: Res<CommandReceiver>) {
+    if let Ok(cmd) = cmd_rx.0.lock().unwrap().try_recv() {
+        match cmd {
+            Command::Save => save_model(&model.policy),
+        }
+    }
 }
 
 fn train_model(mut model: ResMut<Model>) {

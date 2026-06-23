@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, sync::mpsc::Sender};
 
 use bevy::ecs::resource::Resource;
 use burn::{
@@ -17,6 +17,7 @@ use crate::{
         policy::Policy,
         transition::Transition,
     },
+    tui::Metric,
 };
 
 type Backend = Autodiff<Cuda>;
@@ -31,10 +32,17 @@ pub struct Model {
     pub transitions: Vec<Transition>,
     pub optim: MyOptim,
     pub baseline: f32,
+    pub tx: Sender<Metric>,
+
+    pub episode_count: usize,
+    pub last_win: bool,
+    pub last_total_reward: f32,
+    pub last_loss: f32,
+    pub last_steps: usize,
 }
 
 impl Model {
-    pub fn new() -> Self {
+    pub fn new(tx: Sender<Metric>) -> Self {
         let device = Default::default();
 
         let width = 20;
@@ -49,6 +57,12 @@ impl Model {
             transitions: Vec::new(),
             optim: AdamConfig::new().init(),
             baseline: 0.0,
+            tx,
+            episode_count: 0,
+            last_win: false,
+            last_total_reward: 0.0,
+            last_loss: 0.0,
+            last_steps: 0,
         }
     }
     pub fn train_step(&mut self) {
@@ -94,8 +108,17 @@ impl Model {
         });
 
         if result.done {
+            self.episode_count += 1;
             self.finish_episode();
             self.game.reset();
+
+            self.tx.send(Metric::EpisodeDone {
+                episode: self.episode_count,
+                total_reward: self.last_total_reward,
+                steps: self.last_steps,
+                win: self.last_win,
+                loss: self.last_loss,
+            }).unwrap();
         }
     }
     fn compute_returns(&self, gamma: f32) -> Vec<f32> {
@@ -153,6 +176,16 @@ impl Model {
         let grads = GradientsParams::from_grads(grads, &self.policy);
         self.policy = self.optim.step(1e-3, self.policy.clone(), grads);
 
+        // for ratatui
+        self.last_loss = loss.clone().into_scalar();
+        self.last_win = self
+            .transitions
+            .last()
+            .map(|t| t.reward >= 1.0)
+            .unwrap_or(false);
+        self.last_total_reward = self.transitions.iter().map(|t| t.reward).sum();
+        self.last_steps = self.transitions.len();
+
         self.transitions.clear();
     }
 }
@@ -175,7 +208,7 @@ fn obs_to_tensor(obs: &Observation, device: &Device<Backend>) -> Tensor<Backend,
     Tensor::<Backend, 2>::from_floats(data, device)
 }
 
-fn load_model() -> Model {
+fn load_model(tx: Sender<Metric>) -> Model {
     let device = Device::<Backend>::default();
     let recorder = NamedMpkFileRecorder::<FullPrecisionSettings>::new();
     let width = 20;
@@ -192,13 +225,19 @@ fn load_model() -> Model {
         transitions: Vec::new(),
         optim: AdamConfig::new().init(),
         baseline: 0.0,
+        tx,
+        episode_count: 0,
+        last_win: false,
+        last_total_reward: 0.0,
+        last_loss: 0.0,
+        last_steps: 0,
     }
 }
 
-fn save_model(model: Model) {
+pub fn save_model(policy: &Policy<Backend>) {
     let recorder = NamedMpkFileRecorder::<FullPrecisionSettings>::new();
-    model
-        .policy
+    policy
+        .clone()
         .save_file(Path::new("../model.bpk"), &recorder)
         .unwrap();
 }

@@ -7,6 +7,4 @@ edition = "2024"
 bevy = { version = "0.18.1", features = ["2d"] }
 burn = { version = "0.21.0", features = ["train", "cuda", "tui", "metrics"] }
 rand = "0.10.1"
-
-# [patch.crates-io]
-# cudarc = { git = "https://github.com/chelsea0x3b/cudarc", tag = "v0.19.8" }
+ratatui = "0.30.2"

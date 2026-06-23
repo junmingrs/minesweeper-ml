@@ -50,7 +50,7 @@ pub enum Action {
 }
 
 pub enum ActionOutcome {
-    RevealCell,
+    RevealCell(f32),
     HitBomb,
     FlagPlaced,
     FlagRemoved,
@@ -113,11 +113,12 @@ impl Game {
     pub fn get_cell_mut(&mut self, x: usize, y: usize) -> &mut Cell {
         &mut self.map[y][x]
     }
-    pub fn reveal_non_zero(&mut self, x: usize, y: usize) {
+    pub fn reveal_non_zero(&mut self, x: usize, y: usize) -> f32 {
         let cell = self.get_cell_mut(x, y);
         if cell.nearby_bombs != 0 || cell.is_bomb {
-            return;
+            return 0.0;
         }
+        let mut cells_revealed = 1_f32;
         cell.revealed = true;
         let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
         queue.push_back((cell.x, cell.y));
@@ -126,6 +127,7 @@ impl Game {
             let (cell_x, cell_y) = queue.pop_front().unwrap();
             let cell = self.get_cell_mut(cell_x, cell_y);
             cell.revealed = true;
+            cells_revealed += 1.0;
             if cell.nearby_bombs != 0 {
                 continue;
             }
@@ -142,6 +144,7 @@ impl Game {
                 }
             }
         }
+        cells_revealed
     }
     pub fn check_win(&self) -> Option<bool> {
         let mut safe_opened = 0;
@@ -169,6 +172,7 @@ impl Game {
         match action {
             Action::Reveal(x, y) => {
                 let cell = self.get_cell_mut(x, y);
+                let mut cells_revealed = 0_f32;
                 if cell.flagged || cell.revealed {
                     return ActionOutcome::Invalid;
                 }
@@ -177,14 +181,14 @@ impl Game {
                     return ActionOutcome::HitBomb;
                 }
                 if cell.nearby_bombs == 0 {
-                    self.reveal_non_zero(x, y);
+                    cells_revealed = self.reveal_non_zero(x, y);
                 }
                 if let Some(win) = self.check_win()
                     && win
                 {
                     return ActionOutcome::Win;
                 }
-                ActionOutcome::RevealCell
+                ActionOutcome::RevealCell(cells_revealed)
             }
             Action::FlagToggle(x, y) => {
                 let no_flags = self.flags == 0;
