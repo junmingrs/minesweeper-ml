@@ -12,6 +12,7 @@ use crate::{game::Cell, ml::model::Model};
 
 mod game;
 mod ml;
+mod tui;
 
 const REVEALED_PALETTE: [Color; 2] = [Color::srgb_u8(229, 194, 159), Color::srgb_u8(215, 184, 153)];
 const FLAGGED_COLOR: Color = Color::srgb_u8(100, 100, 200);

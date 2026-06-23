@@ -3,7 +3,7 @@ use burn::{
     Tensor,
     backend::{Autodiff, Cuda},
     optim::{Adam, AdamConfig, GradientsParams, Optimizer, adaptor::OptimizerAdaptor},
-    tensor::{Device, TensorData, activation::log_softmax},
+    tensor::{Device, Int, TensorData, activation::log_softmax},
 };
 
 use crate::{
@@ -112,24 +112,47 @@ impl Model {
         let mut loss = Tensor::<Backend, 1>::zeros([1], &self.device);
         let entropy_coeff = 0.01;
 
-        for (t, r) in self.transitions.iter().zip(returns.iter()) {
-            let obs = obs_to_tensor(&t.observation, &self.device);
+        let obs_list: Vec<Tensor<Backend, 2>> = self
+            .transitions
+            .iter()
+            .map(|t| obs_to_tensor(&t.observation, &self.device))
+            .collect();
 
-            let logits = self.policy.forward(obs);
-            let log_probs = log_softmax(logits, 1);
-            let entropy = -(log_probs.clone().exp() * log_probs.clone()).sum();
+        let obs_batch = Tensor::cat(obs_list, 0);
+        let logits = self.policy.forward(obs_batch);
+        let log_probs = log_softmax(logits, 1);
 
-            let action_tensor =
-                Tensor::<Backend, 1>::from_floats([t.action as f32], &self.device).int();
-            let selected_log_prob = log_probs.select(1, action_tensor).sum();
+        let actions: Vec<i32> = self.transitions.iter().map(|t| t.action as i32).collect();
 
-            let reward = Tensor::<Backend, 1>::from_floats([*r], &self.device);
+        // let action_tensor =
+        //     Tensor::<Backend, 1>::from_floats([t.action as f32], &self.device).int();
+        let action_tensor = Tensor::<Backend, 1, Int>::from_data(
+            TensorData::new(actions, [self.transitions.len()]),
+            &self.device,
+        );
+        // let selected_log_prob = log_probs.select(1, action_tensor).sum();
+        let selected_log_probs = log_probs
+            .clone()
+            .gather(1, action_tensor.unsqueeze_dim(1))
+            .squeeze_dim(1);
 
-            let advantage = reward - self.baseline;
+        // let entropy = -(log_probs.clone().exp() * log_probs.clone()).sum();
+        let entropy: Tensor<Backend, 1> = -(log_probs.clone().exp() * log_probs).sum_dim(1).squeeze_dim(1);
 
-            loss = loss - selected_log_prob * advantage;
-            loss = loss - entropy_coeff * entropy;
-        }
+        let returns_tensor = Tensor::<Backend, 1>::from_data(
+            TensorData::new(returns.clone(), [returns.len()]),
+            &self.device,
+        );
+
+        // let reward = Tensor::<Backend, 1>::from_floats([*r], &self.device);
+
+        // let advantage = reward - self.baseline;
+
+        // loss = loss - selected_log_prob * advantage;
+        // loss = loss - entropy_coeff * entropy;
+
+        let loss =
+            (selected_log_probs * returns_tensor).sum().neg() - entropy.sum() * entropy_coeff;
 
         let grads = loss.backward();
         let grads = GradientsParams::from_grads(grads, &self.policy);
