@@ -1,12 +1,13 @@
-use core::num;
 use std::collections::VecDeque;
 
 use bevy::{
-    color::{Color, Srgba},
+    color::Color,
     ecs::{component::Component, resource::Resource},
     math::bool,
 };
 use rand::RngExt;
+
+use crate::ml::env::Observation;
 
 const PALETTE: [Color; 2] = [Color::srgb_u8(170, 215, 81), Color::srgb_u8(142, 189, 53)];
 const BOMB_COLOR: Color = Color::srgb_u8(255, 50, 50);
@@ -25,6 +26,8 @@ pub struct Cell {
 #[derive(Resource)]
 pub struct Game {
     pub map: Vec<Vec<Cell>>,
+    pub height: usize,
+    pub width: usize,
     pub num_bombs: usize,
     pub flags: usize,
     pub win: bool,
@@ -40,6 +43,20 @@ const OFFSETS: [(i16, i16); 8] = [
     (1, 0),
     (1, 1),
 ];
+
+pub enum Action {
+    Reveal(usize, usize),
+    FlagToggle(usize, usize),
+}
+
+pub enum ActionOutcome {
+    RevealCell,
+    HitBomb,
+    FlagPlaced,
+    FlagRemoved,
+    Invalid,
+    Win,
+}
 
 impl Game {
     pub fn new(height: usize, width: usize, num_bombs: usize) -> Self {
@@ -80,11 +97,16 @@ impl Game {
 
         Self {
             map,
+            height,
+            width,
             win: false,
             num_bombs: bomb_locations.len(),
             flags: bomb_locations.len(),
         }
     }
+    // pub fn reset(&self) -> Game {
+    //     Game::new(self.map.len(), self.map[0].len(), self.num_bombs)
+    // }
     pub fn get_cell(&self, x: usize, y: usize) -> &Cell {
         &self.map[y][x]
     }
@@ -100,7 +122,7 @@ impl Game {
         let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
         queue.push_back((cell.x, cell.y));
 
-        while queue.len() > 0 {
+        while !queue.is_empty() {
             let (cell_x, cell_y) = queue.pop_front().unwrap();
             let cell = self.get_cell_mut(cell_x, cell_y);
             cell.revealed = true;
@@ -128,7 +150,7 @@ impl Game {
         for row in self.map.iter() {
             for cell in row.iter() {
                 if cell.is_bomb && cell.revealed {
-                    return Some(false); 
+                    return Some(false);
                 }
                 if !cell.is_bomb && cell.revealed {
                     safe_opened += 1;
@@ -142,27 +164,72 @@ impl Game {
             return Some(true);
         }
         None
-    // TODO: something here
-    // win = Some(true), lose = Some(false), no decision = None
-    //     let num_safe_cells = (self.map.len() * self.map[0].len()) - self.num_bombs;
-    //     let mut num_revealed_safe_cells = 0;
-    //     for row in self.map.iter() {
-    //         for cell in row.iter() {
-    //             if cell.is_bomb {
-    //                 if cell.revealed {
-    //                     return Some(false);
-    //                 }
-    //             } else if cell.revealed {
-    //                 num_revealed_safe_cells += 1;
-    //             }
-    //         }
-    //     }
-    //     if num_safe_cells == num_revealed_safe_cells {
-    //         return Some(true);
-    //     } else {
-    //         return None;
-    //     }
-    // }
+    }
+    pub fn apply_action(&mut self, action: Action) -> ActionOutcome {
+        match action {
+            Action::Reveal(x, y) => {
+                let cell = self.get_cell_mut(x, y);
+                if cell.flagged || cell.revealed {
+                    return ActionOutcome::Invalid;
+                }
+                cell.revealed = true;
+                if cell.is_bomb {
+                    return ActionOutcome::HitBomb;
+                }
+                if cell.nearby_bombs == 0 {
+                    self.reveal_non_zero(x, y);
+                }
+                if let Some(win) = self.check_win()
+                    && win
+                {
+                    return ActionOutcome::Win;
+                }
+                ActionOutcome::RevealCell
+            }
+            Action::FlagToggle(x, y) => {
+                let no_flags = self.flags == 0;
+                let delta = {
+                    let cell = self.get_cell_mut(x, y);
+                    if !cell.flagged && !no_flags {
+                        cell.flagged = true;
+                        -1
+                    } else if cell.flagged {
+                        cell.flagged = false;
+                        1
+                    } else {
+                        0
+                    }
+                };
+                match delta {
+                    -1 => self.flags -= 1,
+                    1 => self.flags += 1,
+                    _ => {}
+                }
+                ActionOutcome::FlagPlaced
+            }
+        }
+    }
+    pub fn to_observation(&self) -> Observation {
+        let width = self.map[0].len();
+        let height = self.map.len();
+        let mut hidden = Vec::with_capacity(width * height);
+        let mut revealed = Vec::with_capacity(width * height);
+        let mut flagged = Vec::with_capacity(width * height);
+
+        for row in &self.map {
+            for cell in row {
+                hidden.push(if cell.revealed { 0.0 } else { 1.0 });
+                revealed.push(if cell.revealed { 1.0 } else { 0.0 });
+                flagged.push(if cell.flagged { 1.0 } else { 0.0 });
+            }
+        }
+        Observation {
+            hidden,
+            revealed,
+            flagged,
+            width,
+            height,
+        }
     }
 }
 

@@ -6,12 +6,13 @@ use bevy::{
 };
 
 use bevy::prelude::*;
+use burn::backend::{Autodiff, Cuda};
 
-use crate::game::{Cell, Game};
+use crate::{game::Cell, ml::model::Model};
 
 mod game;
+mod ml;
 
-const BOMB_COLOR: Color = Color::srgb_u8(255, 50, 50);
 const REVEALED_PALETTE: [Color; 2] = [Color::srgb_u8(229, 194, 159), Color::srgb_u8(215, 184, 153)];
 const FLAGGED_COLOR: Color = Color::srgb_u8(100, 100, 200);
 const ONE_COLOR: Color = Color::srgb_u8(25, 118, 210);
@@ -35,21 +36,27 @@ struct CellText;
 #[derive(Component)]
 struct FlagsText;
 
+type Backend = Autodiff<Cuda>;
+
 fn main() {
-    let game = Game::new(20, 10, 50);
     App::new()
         .add_plugins(DefaultPlugins)
-        .insert_resource(game)
+        .insert_resource(Model::new())
         .add_systems(Startup, setup)
-        .add_systems(Update, button_system)
-        .add_systems(Update, hover_system)
+        // .add_systems(Update, button_system)
+        // .add_systems(Update, hover_system)
+        .add_systems(Update, train_model)
         .add_systems(Update, update_cells)
         .add_systems(Update, update_flags)
-        .add_systems(PostUpdate, check_win)
+        // .add_systems(PostUpdate, check_win)
         .run();
 }
 
-fn setup(mut commands: Commands, game: Res<Game>) {
+fn train_model(mut model: ResMut<Model>) {
+    model.train_step();
+}
+
+fn setup(mut commands: Commands, model: Res<Model>) {
     commands.spawn(Camera2d);
     commands
         .spawn((
@@ -66,7 +73,7 @@ fn setup(mut commands: Commands, game: Res<Game>) {
             BorderColor::all(Color::BLACK),
         ))
         .with_children(|builder| {
-            for row in game.map.iter() {
+            for row in model.game.map.iter() {
                 for cell in row.iter() {
                     item_rect(builder, cell);
                 }
@@ -114,7 +121,7 @@ fn setup(mut commands: Commands, game: Res<Game>) {
                 ))
                 .with_children(|builder| {
                     builder.spawn((
-                        Text::new(format!("Flags: {}", game.flags)),
+                        Text::new(format!("Flags: {}", model.game.flags)),
                         TextFont {
                             font_size: 20.,
                             font_smoothing: bevy::text::FontSmoothing::AntiAliased,
@@ -158,20 +165,20 @@ fn item_rect(builder: &mut ChildSpawnerCommands, cell: &Cell) {
         });
 }
 
-fn update_flags(game: Res<Game>, mut query: Query<&mut Text, With<FlagsText>>) {
+fn update_flags(model: Res<Model>, mut query: Query<&mut Text, With<FlagsText>>) {
     for mut text in &mut query {
-        text.0 = format!("{}", game.flags);
+        text.0 = format!("{}", model.game.flags);
     }
 }
 
 fn update_cells(
     cell_query: Query<(&CellDisplay, &mut BackgroundColor, &Children)>,
     mut text_query: Query<(&mut Text, &mut TextColor), With<CellText>>,
-    game: Res<Game>,
+    model: Res<Model>,
 ) {
     for (cell_display, mut background_color, children) in cell_query {
         // here
-        let cell = game.get_cell(cell_display.x, cell_display.y);
+        let cell = model.game.get_cell(cell_display.x, cell_display.y);
         if cell.flagged {
             background_color.0 = FLAGGED_COLOR;
         }
@@ -205,63 +212,35 @@ fn update_cells(
     }
 }
 
-fn hover_system(
-    mut interaction_query: Query<(&Interaction, &CellDisplay), With<Button>>,
-    keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut game: ResMut<Game>,
-) {
-    for (interaction, cell_display) in &mut interaction_query {
-        if *interaction == Interaction::Hovered && keyboard_input.just_pressed(KeyCode::KeyF) {
-            let delta = {
-                let no_flags = game.flags == 0;
-                let cell = game.get_cell_mut(cell_display.x, cell_display.y);
-                if !cell.flagged && !no_flags {
-                    cell.flagged = true;
-                    -1
-                } else if cell.flagged {
-                    cell.flagged = false;
-                    1
-                } else {
-                    0
-                }
-            };
-            match delta {
-                -1 => game.flags -= 1,
-                1 => game.flags += 1,
-                _ => {}
-            }
-        }
-    }
-}
+// fn hover_system(
+//     mut interaction_query: Query<(&Interaction, &CellDisplay), With<Button>>,
+//     keyboard_input: Res<ButtonInput<KeyCode>>,
+//     mut game: ResMut<Game>,
+// ) {
+//     for (interaction, cell_display) in &mut interaction_query {
+//         if *interaction == Interaction::Hovered && keyboard_input.just_pressed(KeyCode::KeyF) {
+//             game.apply_action(Action::FlagToggle(cell_display.x, cell_display.y));
+//         }
+//     }
+// }
+//
+// fn button_system(
+//     mut interaction_query: Query<
+//         (&Interaction, &CellDisplay),
+//         (Changed<Interaction>, With<Button>),
+//     >,
+//     mut game: ResMut<Game>,
+// ) {
+//     for (interaction, cell_display) in &mut interaction_query {
+//         if *interaction == Interaction::Pressed {
+//             game.apply_action(Action::Reveal(cell_display.x, cell_display.y));
+//         }
+//     }
+// }
 
-fn button_system(
-    mut interaction_query: Query<
-        (&Interaction, &CellDisplay),
-        (Changed<Interaction>, With<Button>),
-    >,
-    mut game: ResMut<Game>,
-) {
-    for (interaction, cell_display) in &mut interaction_query {
-        if *interaction == Interaction::Pressed {
-            let cell = game.get_cell_mut(cell_display.x, cell_display.y);
-            if cell.flagged {
-                continue;
-            }
-            cell.revealed = true;
-            if cell.nearby_bombs == 0 && !cell.is_bomb {
-                game.reveal_non_zero(cell_display.x, cell_display.y);
-            }
-        }
-    }
-}
-
-fn check_win(game: ResMut<Game>, mut commands: Commands) {
-    let win = game.check_win();
-    if let Some(winlose) = win {
-        let height = game.map.len();
-        let width = game.map[0].len();
-        let game = Game::new(height, width, game.num_bombs);
-        commands.remove_resource::<Game>();
-        commands.insert_resource(game);
-    }
-}
+// fn check_win(mut game: ResMut<Game>) {
+//     let win = game.check_win();
+//     if win.is_some() {
+//         game.reset();
+//     }
+// }
