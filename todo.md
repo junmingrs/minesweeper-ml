@@ -1,3 +1,3 @@
-1. [ ] add save/load model
+1. [x] add save/load model
 2. [ ] add tui visualisation
 

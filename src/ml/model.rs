@@ -1,8 +1,12 @@
+use std::path::Path;
+
 use bevy::ecs::resource::Resource;
 use burn::{
     Tensor,
     backend::{Autodiff, Cuda},
+    module::Module,
     optim::{Adam, AdamConfig, GradientsParams, Optimizer, adaptor::OptimizerAdaptor},
+    record::{FullPrecisionSettings, NamedMpkFileRecorder},
     tensor::{Device, Int, TensorData, activation::log_softmax},
 };
 
@@ -109,7 +113,6 @@ impl Model {
         let mut returns = returns;
         normalise(&mut returns);
 
-        let mut loss = Tensor::<Backend, 1>::zeros([1], &self.device);
         let entropy_coeff = 0.01;
 
         let obs_list: Vec<Tensor<Backend, 2>> = self
@@ -123,9 +126,6 @@ impl Model {
         let log_probs = log_softmax(logits, 1);
 
         let actions: Vec<i32> = self.transitions.iter().map(|t| t.action as i32).collect();
-
-        // let action_tensor =
-        //     Tensor::<Backend, 1>::from_floats([t.action as f32], &self.device).int();
         let action_tensor = Tensor::<Backend, 1, Int>::from_data(
             TensorData::new(actions, [self.transitions.len()]),
             &self.device,
@@ -137,19 +137,14 @@ impl Model {
             .squeeze_dim(1);
 
         // let entropy = -(log_probs.clone().exp() * log_probs.clone()).sum();
-        let entropy: Tensor<Backend, 1> = -(log_probs.clone().exp() * log_probs).sum_dim(1).squeeze_dim(1);
+        let entropy: Tensor<Backend, 1> = -(log_probs.clone().exp() * log_probs)
+            .sum_dim(1)
+            .squeeze_dim(1);
 
         let returns_tensor = Tensor::<Backend, 1>::from_data(
             TensorData::new(returns.clone(), [returns.len()]),
             &self.device,
         );
-
-        // let reward = Tensor::<Backend, 1>::from_floats([*r], &self.device);
-
-        // let advantage = reward - self.baseline;
-
-        // loss = loss - selected_log_prob * advantage;
-        // loss = loss - entropy_coeff * entropy;
 
         let loss =
             (selected_log_probs * returns_tensor).sum().neg() - entropy.sum() * entropy_coeff;
@@ -178,4 +173,32 @@ fn obs_to_tensor(obs: &Observation, device: &Device<Backend>) -> Tensor<Backend,
     let input_size = obs.hidden.len() + obs.revealed.len() + obs.flagged.len();
     let data = TensorData::new(input, [1, input_size]);
     Tensor::<Backend, 2>::from_floats(data, device)
+}
+
+fn load_model() -> Model {
+    let device = Device::<Backend>::default();
+    let recorder = NamedMpkFileRecorder::<FullPrecisionSettings>::new();
+    let width = 20;
+    let height = 10;
+    let action_size = 2 * width * height;
+    let input_size = width * height * 3;
+    let policy = Policy::new(&device, input_size, action_size)
+        .load_file(Path::new("../model.bpk"), &recorder, &device)
+        .unwrap();
+    Model {
+        game: Game::new(height, width, 50),
+        policy,
+        device,
+        transitions: Vec::new(),
+        optim: AdamConfig::new().init(),
+        baseline: 0.0,
+    }
+}
+
+fn save_model(model: Model) {
+    let recorder = NamedMpkFileRecorder::<FullPrecisionSettings>::new();
+    model
+        .policy
+        .save_file(Path::new("../model.bpk"), &recorder)
+        .unwrap();
 }
