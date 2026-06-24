@@ -30,7 +30,6 @@ pub struct Game {
     pub width: usize,
     pub num_bombs: usize,
     pub flags: usize,
-    pub win: bool,
 }
 
 const OFFSETS: [(i16, i16); 8] = [
@@ -99,7 +98,6 @@ impl Game {
             map,
             height,
             width,
-            win: false,
             num_bombs: bomb_locations.len(),
             flags: bomb_locations.len(),
         }
@@ -205,11 +203,18 @@ impl Game {
                     }
                 };
                 match delta {
-                    -1 => self.flags -= 1,
-                    1 => self.flags += 1,
-                    _ => {}
+                    -1 => {
+                        self.flags -= 1;
+                        ActionOutcome::FlagPlaced
+                    }
+                    1 => {
+                        self.flags += 1;
+                        ActionOutcome::FlagRemoved
+                    }
+                    _ => {
+                        ActionOutcome::Invalid
+                    }
                 }
-                ActionOutcome::FlagPlaced
             }
         }
     }
