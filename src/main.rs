@@ -114,7 +114,7 @@ fn setup(mut commands: Commands, model: Res<Model>) {
                         height: Val::Px(50.),
                         position_type: PositionType::Absolute,
                         right: Val::Px(0.),
-                        top: Val::Px(50.),
+                        top: Val::Px(0.),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
                         ..default()
@@ -186,8 +186,8 @@ fn update_cells(
             background_color.0 = FLAGGED_COLOR;
         }
         if cell.revealed {
-            if cell.is_bomb { background_color.0 = FLAGGED_BOMB_COLOR; };
             background_color.0 = REVEALED_PALETTE[(cell_display.x + cell_display.y) % 2];
+            if cell.is_bomb { background_color.0 = FLAGGED_BOMB_COLOR; };
             for child in children.iter() {
                 if let Ok((mut text, mut text_color)) = text_query.get_mut(child) {
                     text.0 = format!("{}", cell.nearby_bombs);
