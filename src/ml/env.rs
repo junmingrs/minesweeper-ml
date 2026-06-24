@@ -56,7 +56,7 @@ impl Environment for Game {
         let (reward, done) = match outcome {
             ActionOutcome::RevealCell(n) => (0.05 * n, false),
             ActionOutcome::FlagPlaced => (0.02, false),
-            ActionOutcome::FlagRemoved => (-0.1, false),
+            ActionOutcome::FlagRemoved => (-0.5, false),
             ActionOutcome::Invalid => (-0.5, false),
             ActionOutcome::HitBomb => (-1.0, true),
             ActionOutcome::Win => (2.0, true),

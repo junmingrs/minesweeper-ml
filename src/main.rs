@@ -13,7 +13,6 @@ use bevy::{
 };
 
 use bevy::prelude::*;
-use burn::serde::de;
 
 use crate::{
     game::Cell,
@@ -35,6 +34,7 @@ const FIVE_COLOR: Color = Color::srgb_u8(128, 0, 0);
 const SIX_COLOR: Color = Color::srgb_u8(0, 255, 255);
 const SEVEN_COLOR: Color = Color::srgb_u8(128, 0, 128);
 const EIGHT_COLOR: Color = Color::srgb_u8(128, 128, 128);
+const FLAGGED_BOMB_COLOR: Color = Color::srgb_u8(93, 63, 106);
 
 #[derive(Component)]
 struct CellDisplay {
@@ -114,32 +114,6 @@ fn setup(mut commands: Commands, model: Res<Model>) {
                         height: Val::Px(50.),
                         position_type: PositionType::Absolute,
                         right: Val::Px(0.),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                    BackgroundColor(FLAGGED_COLOR),
-                    Button,
-                ))
-                .with_children(|builder| {
-                    builder.spawn((
-                        Text::new("Restart"),
-                        TextFont {
-                            font_size: 20.,
-                            font_smoothing: bevy::text::FontSmoothing::AntiAliased,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                        CellText,
-                    ));
-                });
-            builder
-                .spawn((
-                    Node {
-                        width: Val::Px(100.),
-                        height: Val::Px(50.),
-                        position_type: PositionType::Absolute,
-                        right: Val::Px(0.),
                         top: Val::Px(50.),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
@@ -212,6 +186,7 @@ fn update_cells(
             background_color.0 = FLAGGED_COLOR;
         }
         if cell.revealed {
+            if cell.is_bomb { background_color.0 = FLAGGED_BOMB_COLOR; };
             background_color.0 = REVEALED_PALETTE[(cell_display.x + cell_display.y) % 2];
             for child in children.iter() {
                 if let Ok((mut text, mut text_color)) = text_query.get_mut(child) {
