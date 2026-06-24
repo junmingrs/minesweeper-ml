@@ -31,7 +31,6 @@ pub struct Model {
     pub policy: Policy<Backend>,
     pub transitions: Vec<Transition>,
     pub optim: MyOptim,
-    pub baseline: f32,
     pub tx: Sender<Metric>,
 
     pub episode_count: usize,
@@ -45,18 +44,16 @@ impl Model {
     pub fn new(tx: Sender<Metric>) -> Self {
         let device = Default::default();
 
-        let width = 20;
-        let height = 10;
-        let action_size = 2 * width * height;
-        let input_size = width * height * 3;
+        let height = 20;
+        let width = 10;
+        let action_size = width * height;
 
         Model {
             game: Game::new(20, 10, 50),
-            policy: Policy::new(&device, input_size, action_size),
+            policy: Policy::new(&device, height, width, action_size),
             device,
             transitions: Vec::new(),
             optim: AdamConfig::new().init(),
-            baseline: 0.0,
             tx,
             episode_count: 0,
             last_win: false,
@@ -138,13 +135,14 @@ impl Model {
 
         let entropy_coeff = 0.01;
 
-        let obs_list: Vec<Tensor<Backend, 2>> = self
+        let obs_list: Vec<Tensor<Backend, 4>> = self
             .transitions
             .iter()
             .map(|t| obs_to_tensor(&t.observation, &self.device))
             .collect();
 
         let obs_batch = Tensor::cat(obs_list, 0);
+        // println!("obs_batch shae: {:?}", obs_batch.dims());
         let logits = self.policy.forward(obs_batch);
         let log_probs = log_softmax(logits, 1);
 
@@ -198,24 +196,25 @@ fn normalise(v: &mut [f32]) {
     }
 }
 
-fn obs_to_tensor(obs: &Observation, device: &Device<Backend>) -> Tensor<Backend, 2> {
+fn obs_to_tensor(obs: &Observation, device: &Device<Backend>) -> Tensor<Backend, 4> {
     let mut input: Vec<f32> = Vec::new();
     input.extend(&obs.hidden);
     input.extend(&obs.revealed);
-    input.extend(&obs.flagged);
-    let input_size = obs.hidden.len() + obs.revealed.len() + obs.flagged.len();
-    let data = TensorData::new(input, [1, input_size]);
-    Tensor::<Backend, 2>::from_floats(data, device)
+    input.extend(&obs.hints.iter().map(|h| h / 8.0).collect::<Vec<_>>());
+    // println!("obs height={} width={}", obs.height, obs.width);
+    let data = TensorData::new(input, [1, 3, obs.height, obs.width]);
+    Tensor::<Backend, 4>::from_floats(data, device)
 }
 
-fn load_model(tx: Sender<Metric>) -> Model {
+pub fn load_model(tx: Sender<Metric>) -> Model {
+    println!("loading model");
     let device = Device::<Backend>::default();
     let recorder = NamedMpkFileRecorder::<FullPrecisionSettings>::new();
-    let width = 20;
-    let height = 10;
-    let action_size = 2 * width * height;
-    let input_size = width * height * 3;
-    let policy = Policy::new(&device, input_size, action_size)
+    let height = 20;
+    let width = 10;
+    // let action_size = 2 * width * height;
+    let action_size = width * height;
+    let policy = Policy::new(&device, height, width, action_size)
         .load_file(Path::new("../model.bpk"), &recorder, &device)
         .unwrap();
     Model {
@@ -224,7 +223,6 @@ fn load_model(tx: Sender<Metric>) -> Model {
         device,
         transitions: Vec::new(),
         optim: AdamConfig::new().init(),
-        baseline: 0.0,
         tx,
         episode_count: 0,
         last_win: false,
@@ -240,4 +238,5 @@ pub fn save_model(policy: &Policy<Backend>) {
         .clone()
         .save_file(Path::new("../model.bpk"), &recorder)
         .unwrap();
+    println!("Model saved");
 }

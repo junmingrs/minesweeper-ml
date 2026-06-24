@@ -45,14 +45,14 @@ const OFFSETS: [(i16, i16); 8] = [
 
 pub enum Action {
     Reveal(usize, usize),
-    FlagToggle(usize, usize),
+    // FlagToggle(usize, usize),
 }
 
 pub enum ActionOutcome {
     RevealCell(f32),
     HitBomb,
-    FlagPlaced,
-    FlagRemoved,
+    // FlagPlaced,
+    // FlagRemoved,
     Invalid,
     Win,
 }
@@ -64,8 +64,8 @@ impl Game {
         let mut bomb_locations: Vec<(usize, usize)> = Vec::new();
         let mut i = 0;
         while i < num_bombs {
-            let x = rng.random_range(0..9_usize);
-            let y = rng.random_range(0..19_usize);
+            let x = rng.random_range(0..width);
+            let y = rng.random_range(0..height);
             if !bomb_locations.contains(&(x, y)) {
                 bomb_locations.push((x, y));
                 i += 1;
@@ -166,6 +166,7 @@ impl Game {
         }
         None
     }
+    // pub fn apply_action(&mut self, action: Action) -> ActionOutcome {
     pub fn apply_action(&mut self, action: Action) -> ActionOutcome {
         match action {
             Action::Reveal(x, y) => {
@@ -188,34 +189,34 @@ impl Game {
                 }
                 ActionOutcome::RevealCell(cells_revealed)
             }
-            Action::FlagToggle(x, y) => {
-                let no_flags = self.flags == 0;
-                let delta = {
-                    let cell = self.get_cell_mut(x, y);
-                    if !cell.flagged && !no_flags {
-                        cell.flagged = true;
-                        -1
-                    } else if cell.flagged {
-                        cell.flagged = false;
-                        1
-                    } else {
-                        0
-                    }
-                };
-                match delta {
-                    -1 => {
-                        self.flags -= 1;
-                        ActionOutcome::FlagPlaced
-                    }
-                    1 => {
-                        self.flags += 1;
-                        ActionOutcome::FlagRemoved
-                    }
-                    _ => {
-                        ActionOutcome::Invalid
-                    }
-                }
-            }
+            // Action::FlagToggle(x, y) => {
+            //     let no_flags = self.flags == 0;
+            //     let delta = {
+            //         let cell = self.get_cell_mut(x, y);
+            //         if !cell.flagged && !no_flags {
+            //             cell.flagged = true;
+            //             -1
+            //         } else if cell.flagged {
+            //             cell.flagged = false;
+            //             1
+            //         } else {
+            //             0
+            //         }
+            //     };
+            //     match delta {
+            //         -1 => {
+            //             self.flags -= 1;
+            //             ActionOutcome::FlagPlaced
+            //         }
+            //         1 => {
+            //             self.flags += 1;
+            //             ActionOutcome::FlagRemoved
+            //         }
+            //         _ => {
+            //             ActionOutcome::Invalid
+            //         }
+            //     }
+            // }
         }
     }
     pub fn to_observation(&self) -> Observation {
@@ -223,21 +224,24 @@ impl Game {
         let height = self.map.len();
         let mut hidden = Vec::with_capacity(width * height);
         let mut revealed = Vec::with_capacity(width * height);
-        let mut flagged = Vec::with_capacity(width * height);
+        // let mut flagged = Vec::with_capacity(width * height);
+        let mut hints = Vec::with_capacity(width * height);
 
         for row in &self.map {
             for cell in row {
                 hidden.push(if cell.revealed { 0.0 } else { 1.0 });
                 revealed.push(if cell.revealed { 1.0 } else { 0.0 });
-                flagged.push(if cell.flagged { 1.0 } else { 0.0 });
+                hints.push(if cell.revealed { cell.nearby_bombs as f32 } else { -1.0 });
+                // flagged.push(if cell.flagged { 1.0 } else { 0.0 });
             }
         }
         Observation {
             hidden,
             revealed,
-            flagged,
-            width,
+            // flagged,
+            hints,
             height,
+            width,
         }
     }
 }

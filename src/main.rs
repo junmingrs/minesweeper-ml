@@ -1,4 +1,5 @@
 use std::{
+    path::Path,
     sync::{
         Mutex,
         mpsc::{self, Receiver},
@@ -16,7 +17,7 @@ use bevy::prelude::*;
 
 use crate::{
     game::Cell,
-    ml::model::{Model, save_model},
+    ml::model::{Model, load_model, save_model},
     tui::{Command, Metric, run_tui},
 };
 
@@ -55,12 +56,19 @@ fn main() {
     let (tx, rx) = mpsc::channel::<Metric>();
     let (cmd_tx, cmd_rx) = mpsc::channel::<Command>();
 
+    let model: Model = if Path::new("../model.bpk").exists() {
+        load_model(tx.clone())
+    } else {
+        Model::new(tx)
+    };
+
     spawn(move || {
         run_tui(rx, cmd_tx).unwrap();
     });
+
     App::new()
         .add_plugins(DefaultPlugins)
-        .insert_resource(Model::new(tx))
+        .insert_resource(model)
         .insert_resource(CommandReceiver(Mutex::new(cmd_rx)))
         .add_systems(Startup, setup)
         // .add_systems(Update, button_system)
@@ -187,7 +195,9 @@ fn update_cells(
         }
         if cell.revealed {
             background_color.0 = REVEALED_PALETTE[(cell_display.x + cell_display.y) % 2];
-            if cell.is_bomb { background_color.0 = FLAGGED_BOMB_COLOR; };
+            if cell.is_bomb {
+                background_color.0 = FLAGGED_BOMB_COLOR;
+            };
             for child in children.iter() {
                 if let Ok((mut text, mut text_color)) = text_query.get_mut(child) {
                     text.0 = format!("{}", cell.nearby_bombs);

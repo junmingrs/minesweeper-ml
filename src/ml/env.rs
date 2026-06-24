@@ -3,9 +3,10 @@ use crate::game::{Action, ActionOutcome, Game};
 pub struct Observation {
     pub hidden: Vec<f32>,
     pub revealed: Vec<f32>,
-    pub flagged: Vec<f32>,
-    pub width: usize,
+    // pub flagged: Vec<f32>,
+    pub hints: Vec<f32>,
     pub height: usize,
+    pub width: usize,
 }
 
 pub struct StepResult {
@@ -22,12 +23,13 @@ pub trait Environment {
 }
 
 impl Observation {
-    pub fn platten(&self) -> Vec<f32> {
+    pub fn flatten(&self) -> Vec<f32> {
         let mut v = Vec::new();
 
         v.extend(self.hidden.iter().copied());
         v.extend(self.revealed.iter().copied());
-        v.extend(self.flagged.iter().copied());
+        // v.extend(self.flagged.iter().copied());
+        v.extend(self.hints.iter().copied());
         v
     }
 }
@@ -38,11 +40,12 @@ impl Environment for Game {
         let idx = action % board_size;
         let x = idx % self.width;
         let y = idx / self.width;
-        if action < board_size {
-            Action::Reveal(x, y)
-        } else {
-            Action::FlagToggle(x, y)
-        }
+        // if action < board_size {
+        //     Action::Reveal(x, y)
+        // } else {
+        //     Action::FlagToggle(x, y)
+        // }
+        Action::Reveal(x, y)
     }
     fn reset(&mut self) -> Observation {
         *self = Game::new(self.height, self.width, self.num_bombs);
@@ -55,8 +58,8 @@ impl Environment for Game {
 
         let (reward, done) = match outcome {
             ActionOutcome::RevealCell(n) => (0.1 * n, false),
-            ActionOutcome::FlagPlaced => (-0.02, false),
-            ActionOutcome::FlagRemoved => (-0.5, false),
+            // ActionOutcome::FlagPlaced => (-0.02, false),
+            // ActionOutcome::FlagRemoved => (-0.5, false),
             ActionOutcome::Invalid => (-0.5, false),
             ActionOutcome::HitBomb => (-1.0, true),
             ActionOutcome::Win => (5.0, true),
@@ -70,7 +73,7 @@ impl Environment for Game {
     }
     fn action_mask(&self) -> Vec<f32> {
         let board_size = self.width * self.height;
-        let mut mask = vec![1.0; board_size * 2];
+        let mut mask = vec![1.0; board_size];
 
         for y in 0..self.height {
             for x in 0..self.width {
@@ -81,10 +84,10 @@ impl Environment for Game {
                     mask[i] = 0.0;
                 }
 
-                let flag_idx = i + board_size;
-                if cell.revealed {
-                    mask[flag_idx] = 0.0;
-                }
+                // let flag_idx = i + board_size;
+                // if cell.revealed {
+                //     mask[flag_idx] = 0.0;
+                // }
             }
         }
 

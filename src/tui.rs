@@ -1,7 +1,6 @@
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
-use bevy::input::keyboard::Key;
 use ratatui::crossterm::{
     event::{self, Event, KeyCode},
     execute,
@@ -14,10 +13,8 @@ use ratatui::{
     style::{Color, Modifier, Style},
     symbols,
     text::{Line, Span},
-    widgets::{Axis, Block, Borders, Chart, Dataset, Gauge, GraphType, List, ListItem, Paragraph},
+    widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, List, ListItem, Paragraph},
 };
-
-use crate::ml::model::save_model;
 
 // ── Metric event sent from training thread ──────────────────────────────────
 
