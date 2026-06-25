@@ -64,18 +64,10 @@ impl Game {
         for y in 0..height {
             let mut row = Vec::new();
             for x in 0..width {
-                // let color: Color;
-                // let is_bomb = bomb_locations.clone().contains(&(x, y));
-                // if is_bomb {
-                //     color = BOMB_COLOR;
-                // } else {
-                //     color = PALETTE[(x + y) % 2];
-                // }
                 row.push(Cell {
                     x,
                     y,
                     is_bomb: false,
-                    // nearby_bombs: get_nearby_bombs(bomb_locations.clone(), (x, y)),
                     nearby_bombs: 0,
                     color: PALETTE[(x + y) % 2],
                     revealed: false,
@@ -89,9 +81,7 @@ impl Game {
             map,
             height,
             width,
-            // num_bombs: bomb_locations.len(),
             num_bombs,
-            // flags: bomb_locations.len(),
             bombs_generated: false,
         }
     }

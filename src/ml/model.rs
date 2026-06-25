@@ -205,6 +205,8 @@ impl Model {
 
         let entropy_coeff = 0.05;
         let value_coeff = 0.5;
+        let clip_episilon = 0.2;
+        let ppo_epochs = 4;
 
         let obs_list: Vec<Tensor<Backend, 4>> = self.transitions[game_idx]
             .iter()
@@ -213,9 +215,15 @@ impl Model {
 
         let obs_batch = Tensor::cat(obs_list, 0);
         // println!("obs_batch shae: {:?}", obs_batch.dims());
-        let (logits, values) = self.policy.forward(obs_batch);
-        let values = values.reshape([self.transitions[game_idx].len()]);
-        let log_probs = log_softmax(logits, 1);
+
+        let old_log_probs_vec: Vec<f32> = self.transitions[game_idx]
+            .iter()
+            .map(|t| t.log_prob)
+            .collect();
+        let old_log_probs = Tensor::<Backend, 1>::from_data(
+            TensorData::new(old_log_probs_vec, [self.transitions[game_idx].len()]),
+            &self.device,
+        );
 
         let actions: Vec<i32> = self.transitions[game_idx]
             .iter()
@@ -225,47 +233,62 @@ impl Model {
             TensorData::new(actions, [self.transitions[game_idx].len()]),
             &self.device,
         );
-        // let selected_log_prob = log_probs.select(1, action_tensor).sum();
-        let selected_log_probs = log_probs
-            .clone()
-            .gather(1, action_tensor.unsqueeze_dim(1))
-            .squeeze_dim(1);
-
-        let entropy: Tensor<Backend, 1> = -(log_probs.clone().exp() * log_probs)
-            .sum_dim(1)
-            .squeeze_dim(1);
 
         let returns_tensor = Tensor::<Backend, 1>::from_data(
             TensorData::new(returns.clone(), [returns.len()]),
             &self.device,
         );
 
-        let advantage = returns_tensor.clone() - values.clone().detach();
-        let actor_loss = (selected_log_probs * advantage).mean().neg();
-        let critic_loss = (returns_tensor - values).powf_scalar(2.0).sum();
+        for _ in 0..ppo_epochs {
+            let (logits, values) = self.policy.forward(obs_batch.clone());
+            let values = values.reshape([self.transitions[game_idx].len()]);
+            let log_probs = log_softmax(logits, 1);
 
-        // let loss =
-        //     (selected_log_probs * returns_tensor).sum().neg() - entropy.sum() * entropy_coeff;
+            let new_log_probs = log_probs
+                .clone()
+                .gather(1, action_tensor.clone().unsqueeze_dim(1))
+                .squeeze_dim(1);
 
-        let loss: Tensor<Backend, 1> =
-            actor_loss + value_coeff * critic_loss - entropy_coeff * entropy.mean();
+            let entropy: Tensor<Backend, 1> = -(log_probs.clone().exp() * log_probs)
+                .sum_dim(1)
+                .squeeze_dim(1);
 
-        self.last_loss = loss.clone().into_scalar();
+            let advantage = returns_tensor.clone() - values.clone().detach();
+            // let actor_loss = (selected_log_probs * advantage).mean().neg();
+            // let critic_loss = (returns_tensor - values).powf_scalar(2.0).sum();
+            let ratio = (new_log_probs - old_log_probs.clone()).exp();
+            let unclipped = ratio.clone() * advantage.clone();
+            let clipped = ratio.clamp(1.0 - clip_episilon, 1.0 + clip_episilon) * advantage;
 
-        if self.last_loss.is_nan() || self.last_loss.is_infinite() {
-            println!("NaN/Inf loss detected, resetting policy");
-            let width = self.games[game_idx].width;
-            let height = self.games[game_idx].height;
-            let action_size = width * height;
-            self.policy = Policy::new(&self.device, height, width, action_size);
-            self.optim = AdamConfig::new().init();
-            self.transitions[game_idx].clear();
-            return;
+            // let loss =
+            //     (selected_log_probs * returns_tensor).sum().neg() - entropy.sum() * entropy_coeff;
+
+            // let loss: Tensor<Backend, 1> =
+            //     actor_loss + value_coeff * critic_loss - entropy_coeff * entropy.mean();
+
+            let actor_loss = unclipped.min_pair(clipped).mean().neg();
+            let critic_loss = (returns_tensor.clone() - values).powf_scalar(2.0).mean();
+
+            let loss: Tensor<Backend, 1> =
+                actor_loss + value_coeff * critic_loss - entropy_coeff * entropy.mean();
+
+            self.last_loss = loss.clone().into_scalar();
+
+            if self.last_loss.is_nan() || self.last_loss.is_infinite() {
+                println!("NaN/Inf loss detected, resetting policy");
+                let width = self.games[game_idx].width;
+                let height = self.games[game_idx].height;
+                let action_size = width * height;
+                self.policy = Policy::new(&self.device, height, width, action_size);
+                self.optim = AdamConfig::new().init();
+                self.transitions[game_idx].clear();
+                return;
+            }
+
+            let grads = loss.backward();
+            let grads = GradientsParams::from_grads(grads, &self.policy);
+            self.policy = self.optim.step(1e-4, self.policy.clone(), grads);
         }
-
-        let grads = loss.backward();
-        let grads = GradientsParams::from_grads(grads, &self.policy);
-        self.policy = self.optim.step(1e-4, self.policy.clone(), grads);
 
         // for ratatui
         self.last_win = self.transitions[game_idx]
@@ -307,7 +330,7 @@ pub fn load_model(tx: Sender<Metric>) -> Model {
     // let action_size = 2 * width * height;
     let action_size = width * height;
     let policy = Policy::new(&device, height, width, action_size)
-        .load_file(Path::new("model"), &recorder, &device)
+        .load_file(Path::new("model_ppo"), &recorder, &device)
         .unwrap();
     Model {
         games: (0..num_games)
@@ -330,7 +353,7 @@ pub fn save_model(policy: &Policy<Backend>) {
     let recorder = NamedMpkFileRecorder::<FullPrecisionSettings>::new();
     policy
         .clone()
-        .save_file(Path::new("model"), &recorder)
+        .save_file(Path::new("model_ppo"), &recorder)
         .unwrap();
     println!("Model saved");
 }
