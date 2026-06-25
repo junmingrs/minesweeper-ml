@@ -57,7 +57,7 @@ fn main() {
     let (tx, rx) = mpsc::channel::<Metric>();
     let (cmd_tx, cmd_rx) = mpsc::channel::<Command>();
 
-    let mut model: Model = if Path::new("model_ppo.mpk").exists() {
+    let mut model: Model = if Path::new("model_fcn_dqn.mpk").exists() {
         load_model(tx.clone())
     } else {
         Model::new(tx)

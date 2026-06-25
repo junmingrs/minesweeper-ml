@@ -1,4 +1,4 @@
-use crate::game::{Action, ActionOutcome, Game};
+use crate::game::{Action, ActionOutcome, Game, OFFSETS};
 
 pub struct Observation {
     pub hidden: Vec<f32>,
@@ -10,7 +10,6 @@ pub struct Observation {
 }
 
 pub struct StepResult {
-    pub observation: Observation,
     pub reward: f32,
     pub done: bool,
 }
@@ -20,18 +19,6 @@ pub trait Environment {
     fn reset(&mut self) -> Observation;
     fn step(&mut self, action: usize) -> StepResult;
     fn action_mask(&self) -> Vec<f32>;
-}
-
-impl Observation {
-    pub fn flatten(&self) -> Vec<f32> {
-        let mut v = Vec::new();
-
-        v.extend(self.hidden.iter().copied());
-        v.extend(self.revealed.iter().copied());
-        // v.extend(self.flagged.iter().copied());
-        v.extend(self.hints.iter().copied());
-        v
-    }
 }
 
 impl Environment for Game {
@@ -57,7 +44,16 @@ impl Environment for Game {
         let outcome = self.apply_action(action);
 
         let (reward, done) = match outcome {
-            ActionOutcome::RevealCell(n) => (0.1 * n, false),
+            ActionOutcome::RevealCell(n) => {
+                let mut nearby_revealed_cells = 0_f32;
+                for (offset_x, offset_y) in OFFSETS {
+                    let Action::Reveal(x, y) = action;
+                    if self.calculate_offset(x, y, offset_x, offset_y).is_some() {
+                        nearby_revealed_cells += 1.0;
+                    };
+                }
+                (0.1 * n * nearby_revealed_cells, false)
+            }
             // ActionOutcome::FlagPlaced => (-0.02, false),
             // ActionOutcome::FlagRemoved => (-0.5, false),
             ActionOutcome::Invalid => (-0.5, false),
@@ -66,7 +62,6 @@ impl Environment for Game {
         };
 
         StepResult {
-            observation: self.to_observation(),
             reward,
             done,
         }

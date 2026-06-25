@@ -1,9 +1,10 @@
-use crate::ml::env::Observation;
-
 pub struct Transition {
-    pub observation: Observation,
+    // pub observation: Observation,
+    pub obs: Vec<f32>,
+    pub next_obs: Vec<f32>,
     pub action: usize,
     pub reward: f32,
+    // pub next_observation: Observation,
     pub done: bool,
-    pub log_prob: f32,
+    // pub log_prob: f32,
 }

@@ -221,11 +221,12 @@ fn draw_stats(f: &mut Frame, area: Rect, app: &AppTUI) {
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Ratio(1, 5),
-            Constraint::Ratio(1, 5),
-            Constraint::Ratio(1, 5),
-            Constraint::Ratio(1, 5),
-            Constraint::Ratio(1, 5),
+            Constraint::Ratio(1, 6),
+            Constraint::Ratio(1, 6),
+            Constraint::Ratio(1, 6),
+            Constraint::Ratio(1, 6),
+            Constraint::Ratio(1, 6),
+            Constraint::Ratio(1, 6),
         ])
         .split(area);
 
@@ -246,20 +247,27 @@ fn draw_stats(f: &mut Frame, area: Rect, app: &AppTUI) {
     stat_card(
         f,
         cols[2],
+        "Win rate / 200 ep",
+        &format!("{:.1}%", app.win_rate_history.iter().sum::<f64>() / 2.0),
+        Color::LightGreen,
+    );
+    stat_card(
+        f,
+        cols[3],
         "Avg reward",
         &format!("{:.3}", app.avg_reward()),
         Color::Yellow,
     );
     stat_card(
         f,
-        cols[3],
+        cols[4],
         "Avg loss",
         &format!("{:.4}", app.avg_loss()),
         Color::Red,
     );
     stat_card(
         f,
-        cols[4],
+        cols[5],
         "Total steps",
         &app.total_steps.to_string(),
         Color::Cyan,

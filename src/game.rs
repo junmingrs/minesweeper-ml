@@ -33,7 +33,7 @@ pub struct Game {
     pub bombs_generated: bool,
 }
 
-const OFFSETS: [(i16, i16); 8] = [
+pub const OFFSETS: [(i16, i16); 8] = [
     (-1, -1),
     (-1, 0),
     (-1, 1),
@@ -44,6 +44,7 @@ const OFFSETS: [(i16, i16); 8] = [
     (1, 1),
 ];
 
+#[derive(Clone, Copy)]
 pub enum Action {
     Reveal(usize, usize),
     // FlagToggle(usize, usize),
@@ -272,7 +273,7 @@ impl Game {
         }
         nearby_bombs
     }
-    fn calculate_offset(
+    pub fn calculate_offset(
         &self,
         x: usize,
         y: usize,
