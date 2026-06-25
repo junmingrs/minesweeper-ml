@@ -161,7 +161,7 @@ pub fn run_tui(rx: Receiver<Metric>, cmd_tx: Sender<Command>) -> std::io::Result
                         cmd_tx.send(Command::Save).ok();
                         app.log.push("--- save requested ---".to_string());
                     }
-                    KeyCode::Char('q') | KeyCode::Esc => break,
+                    KeyCode::Char('q') => break,
                     _ => {}
                 }
             }

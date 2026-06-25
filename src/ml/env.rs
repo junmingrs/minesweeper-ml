@@ -75,13 +75,17 @@ impl Environment for Game {
         let board_size = self.width * self.height;
         let mut mask = vec![1.0; board_size];
 
-        for y in 0..self.height {
-            for x in 0..self.width {
-                let i = y * self.width + x;
-                let cell = self.get_cell(x, y);
+        for row in &self.map {
+            for cell in row {
+                // let i = y * self.width + x;
+                // let cell = self.get_cell(x, y);
 
-                if cell.revealed || cell.flagged {
-                    mask[i] = 0.0;
+                // if cell.revealed || cell.flagged {
+                //     mask[i] = 0.0;
+                // }
+
+                if cell.revealed {
+                    mask[cell.y * self.width + cell.x] = 0.0;
                 }
 
                 // let flag_idx = i + board_size;

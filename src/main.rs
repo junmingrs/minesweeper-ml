@@ -41,6 +41,7 @@ const FLAGGED_BOMB_COLOR: Color = Color::srgb_u8(93, 63, 106);
 struct CellDisplay {
     x: usize,
     y: usize,
+    pub game_idx: usize,
 }
 
 #[derive(Component)]
@@ -56,7 +57,7 @@ fn main() {
     let (tx, rx) = mpsc::channel::<Metric>();
     let (cmd_tx, cmd_rx) = mpsc::channel::<Command>();
 
-    let model: Model = if Path::new("../model.bpk").exists() {
+    let mut model: Model = if Path::new("model.mpk").exists() {
         load_model(tx.clone())
     } else {
         Model::new(tx)
@@ -66,19 +67,31 @@ fn main() {
         run_tui(rx, cmd_tx).unwrap();
     });
 
-    App::new()
-        .add_plugins(DefaultPlugins)
-        .insert_resource(model)
-        .insert_resource(CommandReceiver(Mutex::new(cmd_rx)))
-        .add_systems(Startup, setup)
-        // .add_systems(Update, button_system)
-        // .add_systems(Update, hover_system)
-        .add_systems(Update, train_model)
-        .add_systems(Update, update_cells)
-        .add_systems(Update, update_flags)
-        .add_systems(Update, handle_commands)
-        // .add_systems(PostUpdate, check_win)
-        .run();
+    loop {
+        model.train_step();
+        match cmd_rx.try_recv() {
+            Ok(_) => {
+                save_model(&model.policy);
+            }
+            Err(_) => {
+                // println!("could not save model!");
+            }
+        }
+    }
+
+    // App::new()
+    //     .add_plugins(DefaultPlugins)
+    //     .insert_resource(model)
+    //     .insert_resource(CommandReceiver(Mutex::new(cmd_rx)))
+    //     .add_systems(Startup, setup)
+    //     // .add_systems(Update, button_system)
+    //     // .add_systems(Update, hover_system)
+    //     .add_systems(Update, train_model)
+    //     .add_systems(Update, update_cells)
+    //     // .add_systems(Update, update_flags)
+    //     .add_systems(Update, handle_commands)
+    //     // .add_systems(PostUpdate, check_win)
+    //     .run();
 }
 
 fn handle_commands(model: Res<Model>, cmd_rx: Res<CommandReceiver>) {
@@ -101,8 +114,8 @@ fn setup(mut commands: Commands, model: Res<Model>) {
                 display: Display::Grid,
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
-                grid_template_rows: vec![GridTrack::px(50.0); 20],
-                grid_template_columns: vec![GridTrack::px(50.0); 10],
+                grid_template_rows: vec![GridTrack::fr(1.0); 4],
+                grid_template_columns: vec![GridTrack::fr(1.0); 2],
                 border: UiRect::all(Val::Px(5.0)),
                 ..Default::default()
             },
@@ -110,47 +123,68 @@ fn setup(mut commands: Commands, model: Res<Model>) {
             BorderColor::all(Color::BLACK),
         ))
         .with_children(|builder| {
-            for row in model.game.map.iter() {
-                for cell in row.iter() {
-                    item_rect(builder, cell);
-                }
+            for (game_idx, game) in model.games.iter().enumerate() {
+                builder
+                    .spawn(
+                        (Node {
+                            display: Display::Grid,
+                            // width: Val::Percent(100.0),
+                            // height: Val::Percent(100.0),
+                            grid_template_rows: vec![GridTrack::fr(1.0); game.height],
+                            grid_template_columns: vec![GridTrack::fr(1.0); game.width],
+                            border: UiRect::all(Val::Px(2.0)),
+                            ..Default::default()
+                        }),
+                    )
+                    .with_children(|builder| {
+                        for row in game.map.iter() {
+                            for cell in row.iter() {
+                                item_rect(builder, cell, game_idx);
+                            }
+                        }
+                    });
             }
-            builder
-                .spawn((
-                    Node {
-                        width: Val::Px(100.),
-                        height: Val::Px(50.),
-                        position_type: PositionType::Absolute,
-                        right: Val::Px(0.),
-                        top: Val::Px(0.),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                    BackgroundColor(FLAGGED_COLOR),
-                    Button,
-                ))
-                .with_children(|builder| {
-                    builder.spawn((
-                        Text::new(format!("Flags: {}", model.game.flags)),
-                        TextFont {
-                            font_size: 20.,
-                            font_smoothing: bevy::text::FontSmoothing::AntiAliased,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                        FlagsText,
-                    ));
-                });
+            // for row in model.games.map.iter() {
+            //     for cell in row.iter() {
+            //         item_rect(builder, cell);
+            //     }
+            // }
+            // builder
+            //     .spawn((
+            //         Node {
+            //             width: Val::Px(100.),
+            //             height: Val::Px(50.),
+            //             position_type: PositionType::Absolute,
+            //             right: Val::Px(0.),
+            //             top: Val::Px(0.),
+            //             justify_content: JustifyContent::Center,
+            //             align_items: AlignItems::Center,
+            //             ..default()
+            //         },
+            //         BackgroundColor(FLAGGED_COLOR),
+            //         Button,
+            //     ))
+            //     .with_children(|builder| {
+            //         builder.spawn((
+            //             Text::new(format!("Flags: {}", model.game.flags)),
+            //             TextFont {
+            //                 font_size: 20.,
+            //                 font_smoothing: bevy::text::FontSmoothing::AntiAliased,
+            //                 ..default()
+            //             },
+            //             TextColor(Color::WHITE),
+            //             FlagsText,
+            //         ));
+            //     });
         });
 }
 
-fn item_rect(builder: &mut ChildSpawnerCommands, cell: &Cell) {
+fn item_rect(builder: &mut ChildSpawnerCommands, cell: &Cell, game_idx: usize) {
     builder
         .spawn((
             Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
+                // width: Val::Percent(100.0),
+                // height: Val::Percent(100.0),
                 justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
                 ..Default::default()
@@ -160,13 +194,14 @@ fn item_rect(builder: &mut ChildSpawnerCommands, cell: &Cell) {
             CellDisplay {
                 x: cell.x,
                 y: cell.y,
+                game_idx,
             },
         ))
         .with_children(|parent| {
             parent.spawn((
                 Text::new(""),
                 TextFont {
-                    font_size: 30.0,
+                    font_size: 15.0,
                     font_smoothing: bevy::text::FontSmoothing::AntiAliased,
                     ..default()
                 },
@@ -176,11 +211,11 @@ fn item_rect(builder: &mut ChildSpawnerCommands, cell: &Cell) {
         });
 }
 
-fn update_flags(model: Res<Model>, mut query: Query<&mut Text, With<FlagsText>>) {
-    for mut text in &mut query {
-        text.0 = format!("{}", model.game.flags);
-    }
-}
+// fn update_flags(model: Res<Model>, mut query: Query<&mut Text, With<FlagsText>>) {
+//     for mut text in &mut query {
+//         text.0 = format!("{}", model.game.flags);
+//     }
+// }
 
 fn update_cells(
     cell_query: Query<(&CellDisplay, &mut BackgroundColor, &Children)>,
@@ -189,7 +224,7 @@ fn update_cells(
 ) {
     for (cell_display, mut background_color, children) in cell_query {
         // here
-        let cell = model.game.get_cell(cell_display.x, cell_display.y);
+        let cell = model.games[cell_display.game_idx].get_cell(cell_display.x, cell_display.y);
         if cell.flagged {
             background_color.0 = FLAGGED_COLOR;
         }

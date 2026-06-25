@@ -29,7 +29,8 @@ pub struct Game {
     pub height: usize,
     pub width: usize,
     pub num_bombs: usize,
-    pub flags: usize,
+    // pub flags: usize,
+    pub bombs_generated: bool,
 }
 
 const OFFSETS: [(i16, i16); 8] = [
@@ -60,33 +61,23 @@ pub enum ActionOutcome {
 impl Game {
     pub fn new(height: usize, width: usize, num_bombs: usize) -> Self {
         let mut map: Vec<Vec<Cell>> = Vec::new();
-        let mut rng = rand::rng();
-        let mut bomb_locations: Vec<(usize, usize)> = Vec::new();
-        let mut i = 0;
-        while i < num_bombs {
-            let x = rng.random_range(0..width);
-            let y = rng.random_range(0..height);
-            if !bomb_locations.contains(&(x, y)) {
-                bomb_locations.push((x, y));
-                i += 1;
-            }
-        }
         for y in 0..height {
             let mut row = Vec::new();
             for x in 0..width {
-                let color: Color;
-                let is_bomb = bomb_locations.clone().contains(&(x, y));
-                if is_bomb {
-                    color = BOMB_COLOR;
-                } else {
-                    color = PALETTE[(x + y) % 2];
-                }
+                // let color: Color;
+                // let is_bomb = bomb_locations.clone().contains(&(x, y));
+                // if is_bomb {
+                //     color = BOMB_COLOR;
+                // } else {
+                //     color = PALETTE[(x + y) % 2];
+                // }
                 row.push(Cell {
                     x,
                     y,
-                    is_bomb,
-                    nearby_bombs: get_nearby_bombs(bomb_locations.clone(), (x, y)),
-                    color,
+                    is_bomb: false,
+                    // nearby_bombs: get_nearby_bombs(bomb_locations.clone(), (x, y)),
+                    nearby_bombs: 0,
+                    color: PALETTE[(x + y) % 2],
                     revealed: false,
                     flagged: false,
                 });
@@ -98,8 +89,37 @@ impl Game {
             map,
             height,
             width,
-            num_bombs: bomb_locations.len(),
-            flags: bomb_locations.len(),
+            // num_bombs: bomb_locations.len(),
+            num_bombs,
+            // flags: bomb_locations.len(),
+            bombs_generated: false,
+        }
+    }
+    pub fn generate_bombs(&mut self, action: usize) {
+        let (safe_x, safe_y) = (action % self.width, action / self.width);
+        let mut rng = rand::rng();
+        let mut i = 0;
+        while i < self.num_bombs {
+            let x = rng.random_range(0..self.width);
+            let y = rng.random_range(0..self.height);
+            let too_close = (x as i32 - safe_x as i32).abs() <= 1 && (y as i32 - safe_y as i32).abs() <= 1;
+            let cell = self.get_cell_mut(x, y);
+            // if !(cell.is_bomb || x == safe_x && y == safe_y) {
+            if !cell.is_bomb && !too_close {
+                cell.is_bomb = true;
+                cell.color = BOMB_COLOR;
+                i += 1;
+            }
+        }
+        self.recalculate_hints();
+    }
+    pub fn recalculate_hints(&mut self) {
+        for y in 0..self.height {
+            for x in 0..self.width {
+                if !self.map[y][x].is_bomb {
+                    self.map[y][x].nearby_bombs = self.get_nearby_bombs(x, y);
+                }
+            }
         }
     }
     // pub fn reset(&self) -> Game {
@@ -130,7 +150,7 @@ impl Game {
                 continue;
             }
             for (offset_y, offset_x) in OFFSETS.iter() {
-                let pos = calculate_offset(cell_x, cell_y, *offset_x, *offset_y);
+                let pos = self.calculate_offset(cell_x, cell_y, *offset_x, *offset_y);
                 match pos {
                     Some((world_x, world_y)) => {
                         let cell = self.get_cell(world_x, world_y);
@@ -188,35 +208,34 @@ impl Game {
                     return ActionOutcome::Win;
                 }
                 ActionOutcome::RevealCell(cells_revealed)
-            }
-            // Action::FlagToggle(x, y) => {
-            //     let no_flags = self.flags == 0;
-            //     let delta = {
-            //         let cell = self.get_cell_mut(x, y);
-            //         if !cell.flagged && !no_flags {
-            //             cell.flagged = true;
-            //             -1
-            //         } else if cell.flagged {
-            //             cell.flagged = false;
-            //             1
-            //         } else {
-            //             0
-            //         }
-            //     };
-            //     match delta {
-            //         -1 => {
-            //             self.flags -= 1;
-            //             ActionOutcome::FlagPlaced
-            //         }
-            //         1 => {
-            //             self.flags += 1;
-            //             ActionOutcome::FlagRemoved
-            //         }
-            //         _ => {
-            //             ActionOutcome::Invalid
-            //         }
-            //     }
-            // }
+            } // Action::FlagToggle(x, y) => {
+              //     let no_flags = self.flags == 0;
+              //     let delta = {
+              //         let cell = self.get_cell_mut(x, y);
+              //         if !cell.flagged && !no_flags {
+              //             cell.flagged = true;
+              //             -1
+              //         } else if cell.flagged {
+              //             cell.flagged = false;
+              //             1
+              //         } else {
+              //             0
+              //         }
+              //     };
+              //     match delta {
+              //         -1 => {
+              //             self.flags -= 1;
+              //             ActionOutcome::FlagPlaced
+              //         }
+              //         1 => {
+              //             self.flags += 1;
+              //             ActionOutcome::FlagRemoved
+              //         }
+              //         _ => {
+              //             ActionOutcome::Invalid
+              //         }
+              //     }
+              // }
         }
     }
     pub fn to_observation(&self) -> Observation {
@@ -231,7 +250,11 @@ impl Game {
             for cell in row {
                 hidden.push(if cell.revealed { 0.0 } else { 1.0 });
                 revealed.push(if cell.revealed { 1.0 } else { 0.0 });
-                hints.push(if cell.revealed { cell.nearby_bombs as f32 } else { -1.0 });
+                hints.push(if cell.revealed {
+                    cell.nearby_bombs as f32
+                } else {
+                    -1.0
+                });
                 // flagged.push(if cell.flagged { 1.0 } else { 0.0 });
             }
         }
@@ -244,32 +267,36 @@ impl Game {
             width,
         }
     }
-}
-
-fn calculate_offset(x: usize, y: usize, offset_x: i16, offset_y: i16) -> Option<(usize, usize)> {
-    if (x == 0 && offset_x == -1) || (x == 9 && offset_x == 1) {
-        return None;
-    }
-    if (y == 0 && offset_y == -1) || (y == 19 && offset_y == 1) {
-        return None;
-    }
-    let world_x = (x as i16 + offset_x) as usize;
-    let world_y = (y as i16 + offset_y) as usize;
-    Some((world_x, world_y))
-}
-
-fn get_nearby_bombs(bomb_locations: Vec<(usize, usize)>, position: (usize, usize)) -> usize {
-    let mut nearby_bombs = 0;
-    for (offet_y, offset_x) in OFFSETS.iter() {
-        let pos = calculate_offset(position.0, position.1, *offset_x, *offet_y);
-        match pos {
-            Some((world_x, world_y)) => {
-                if bomb_locations.contains(&(world_x, world_y)) {
-                    nearby_bombs += 1;
+    fn get_nearby_bombs(&self, x: usize, y: usize) -> usize {
+        let mut nearby_bombs = 0;
+        for (offet_y, offset_x) in OFFSETS.iter() {
+            let pos = self.calculate_offset(x, y, *offset_x, *offet_y);
+            match pos {
+                Some((world_x, world_y)) => {
+                    if self.get_cell(world_x, world_y).is_bomb {
+                        nearby_bombs += 1;
+                    }
                 }
+                None => continue,
             }
-            None => continue,
         }
+        nearby_bombs
     }
-    nearby_bombs
+    fn calculate_offset(
+        &self,
+        x: usize,
+        y: usize,
+        offset_x: i16,
+        offset_y: i16,
+    ) -> Option<(usize, usize)> {
+        if (x == 0 && offset_x == -1) || (x == self.width - 1 && offset_x == 1) {
+            return None;
+        }
+        if (y == 0 && offset_y == -1) || (y == self.height - 1 && offset_y == 1) {
+            return None;
+        }
+        let world_x = (x as i16 + offset_x) as usize;
+        let world_y = (y as i16 + offset_y) as usize;
+        Some((world_x, world_y))
+    }
 }
