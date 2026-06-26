@@ -4,10 +4,13 @@ use bevy::ecs::resource::Resource;
 use burn::{
     Tensor,
     backend::{Autodiff, Cuda},
-    module::Module,
+    module::{AutodiffModule, Module},
     optim::{Adam, AdamConfig, GradientsParams, Optimizer, adaptor::OptimizerAdaptor},
     record::{FullPrecisionSettings, NamedMpkFileRecorder},
-    tensor::{Device, Int, TensorData},
+    tensor::{
+        Device, Int, TensorData,
+        backend::{AutodiffBackend, DeviceOps},
+    },
 };
 use rand::RngExt;
 
@@ -23,6 +26,7 @@ use crate::{
 };
 
 type Backend = Autodiff<Cuda>;
+type InnerBackend = <Backend as AutodiffBackend>::InnerBackend;
 
 type MyOptim = OptimizerAdaptor<Adam, Policy<Backend>, Backend>;
 
@@ -64,7 +68,7 @@ impl Model {
                 .collect(),
             policy: Policy::new(&device, height, width, action_size),
             target: Policy::new(&device, height, width, action_size),
-            replay_buffer: ReplayBuffer::new(100_000),
+            replay_buffer: ReplayBuffer::new(50_000),
             device,
             // transitions: (0..num_games).map(|_| Vec::new()).collect(),
             optim: AdamConfig::new().init(),
@@ -85,6 +89,9 @@ impl Model {
             return; // wait until buffer has enough
         }
 
+        let height = self.games[0].height;
+        let width = self.games[0].width;
+
         let batch = self.replay_buffer.sample(batch_size);
 
         // current Q values
@@ -97,10 +104,7 @@ impl Model {
         //     0,
         // );
         let obs_batch = Tensor::<Backend, 4>::from_floats(
-            TensorData::new(
-                obs_data,
-                [batch_size, 3, self.games[0].height, self.games[0].width],
-            ),
+            TensorData::new(obs_data, [batch_size, 3, height, width]),
             &self.device,
         );
 
@@ -110,10 +114,15 @@ impl Model {
             .collect();
         let next_obs_batch = Tensor::<Backend, 4>::from_floats(
             TensorData::new(
-                next_obs_data,
-                [batch_size, 3, self.games[0].height, self.games[0].width],
+                next_obs_data.clone(),
+                [batch_size, 3, height, width],
             ),
             &self.device,
+        );
+
+        let next_obs_batch_inner = Tensor::<InnerBackend, 4>::from_floats(
+            TensorData::new(next_obs_data, [batch_size, 3, height, width]),
+            &self.device.clone().inner(),
         );
 
         // target Q values using target network
@@ -125,7 +134,9 @@ impl Model {
         //     0,
         // );
         let (q_values, _) = self.policy.forward(obs_batch); // [B, action_size]
-        let (next_q_values, _) = self.target.forward(next_obs_batch); // [B, action_size]
+        let (next_q_values, _) = self.target.valid().forward(next_obs_batch.inner()); // [B, action_size]
+
+        let inner_device = next_obs_batch_inner.device();
 
         let rewards: Vec<f32> = batch.iter().map(|t| t.reward).collect();
         let dones: Vec<f32> = batch
@@ -133,15 +144,20 @@ impl Model {
             .map(|t| if t.done { 1.0 } else { 0.0 })
             .collect();
 
-        let rewards_tensor =
-            Tensor::<Backend, 1>::from_data(TensorData::new(rewards, [batch_size]), &self.device);
-        let dones_tensor =
-            Tensor::<Backend, 1>::from_data(TensorData::new(dones, [batch_size]), &self.device);
+        let rewards_tensor = Tensor::<InnerBackend, 1>::from_data(
+            TensorData::new(rewards, [batch_size]),
+            &inner_device,
+        );
+        let dones_tensor = Tensor::<InnerBackend, 1>::from_data(
+            TensorData::new(dones, [batch_size]),
+            &inner_device,
+        );
 
         // Bellman: Q(s,a) = r + gamma * max(Q(s', a')) * (1 - done)
         let max_next_q = next_q_values.max_dim(1).squeeze_dim(1); // [B]
-        let target_q: Tensor<Backend, 1> =
+        let target_q: Tensor<InnerBackend, 1> =
             rewards_tensor + max_next_q * (1.0 - dones_tensor) * 0.99;
+        let target_q = Tensor::<Backend, 1>::from_inner(target_q);
 
         // select Q values for actions taken
         let actions: Vec<i32> = batch.iter().map(|t| t.action as i32).collect();
@@ -181,9 +197,17 @@ impl Model {
             }
 
             let obs = self.games[i].to_observation();
-            let obs_tensor = obs_to_tensor(&obs, &self.device);
+            // let obs_tensor = obs_to_tensor(&obs, &self.device);
+            let obs_vec = obs_to_vec(&obs);
+            let obs_tensor = Tensor::<Backend, 4>::from_floats(
+                TensorData::new(
+                    obs_vec.clone(),
+                    [1, 3, self.games[i].height, self.games[i].width],
+                ),
+                &self.device,
+            );
 
-            let (q_values, _) = self.policy.forward(obs_tensor);
+            let (q_values, _) = self.policy.valid().forward(obs_tensor.inner());
 
             // NOTE: PPO
             // let logits = logits.squeeze_dim(0);
@@ -260,7 +284,7 @@ impl Model {
             } else {
                 // mask Q values and take argmax
                 let mask = self.games[i].action_mask();
-                let mask_tensor = Tensor::<Backend, 1>::from_data(
+                let mask_tensor = Tensor::<InnerBackend, 1>::from_data(
                     TensorData::new(mask, [self.games[i].width * self.games[i].height]),
                     &self.device,
                 );
@@ -282,8 +306,9 @@ impl Model {
             });
 
             self.step_count += 1;
+            self.games[i].step_count += 1;
             // learn every step once buffer is warm
-            if self.replay_buffer.len() >= 256 && self.step_count % 4 == 0 {
+            if self.replay_buffer.len() >= 256 && self.step_count.is_multiple_of(4) {
                 self.train_on_batch(256);
             }
 
@@ -335,11 +360,11 @@ impl Model {
                 //     self.finish_episode(i);
                 // }
                 self.last_win = result.reward >= 1.0;
-                self.last_steps = self.step_count;
+                self.last_steps = self.games[i].step_count;
                 self.last_total_reward = self.episode_rewards[i];
                 self.episode_rewards[i] = 0.0;
                 self.games[i].reset();
-                self.step_count = 0;
+                // self.step_count = 0;
 
                 self.tx
                     .send(Metric::EpisodeDone {
@@ -518,7 +543,7 @@ pub fn load_model(tx: Sender<Metric>) -> Model {
         policy,
         target,
         device,
-        replay_buffer: ReplayBuffer::new(100_000),
+        replay_buffer: ReplayBuffer::new(50_000),
         // transitions: (0..num_games).map(|_| Vec::new()).collect(),
         optim: AdamConfig::new().init(),
         tx,

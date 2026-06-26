@@ -31,6 +31,7 @@ pub struct Game {
     pub num_bombs: usize,
     // pub flags: usize,
     pub bombs_generated: bool,
+    pub step_count: usize,
 }
 
 pub const OFFSETS: [(i16, i16); 8] = [
@@ -84,6 +85,7 @@ impl Game {
             width,
             num_bombs,
             bombs_generated: false,
+            step_count: 0,
         }
     }
     pub fn generate_bombs(&mut self, action: usize) {
