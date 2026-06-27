@@ -7,10 +7,7 @@ use burn::{
     module::{AutodiffModule, Module},
     optim::{Adam, AdamConfig, GradientsParams, Optimizer, adaptor::OptimizerAdaptor},
     record::{FullPrecisionSettings, NamedMpkFileRecorder},
-    tensor::{
-        Device, Int, TensorData,
-        backend::{AutodiffBackend, DeviceOps},
-    },
+    tensor::{Device, Int, TensorData, backend::AutodiffBackend},
 };
 use rand::RngExt;
 
@@ -113,17 +110,14 @@ impl Model {
             .flat_map(|t| t.next_obs.iter().copied())
             .collect();
         let next_obs_batch = Tensor::<Backend, 4>::from_floats(
-            TensorData::new(
-                next_obs_data.clone(),
-                [batch_size, 3, height, width],
-            ),
+            TensorData::new(next_obs_data.clone(), [batch_size, 3, height, width]),
             &self.device,
         );
 
-        let next_obs_batch_inner = Tensor::<InnerBackend, 4>::from_floats(
-            TensorData::new(next_obs_data, [batch_size, 3, height, width]),
-            &self.device.clone().inner(),
-        );
+        // let next_obs_batch_inner = Tensor::<InnerBackend, 4>::from_floats(
+        //     TensorData::new(next_obs_data, [batch_size, 3, height, width]),
+        //     &self.device.clone().inner(),
+        // );
 
         // target Q values using target network
         // let next_obs_batch = Tensor::cat(
@@ -134,9 +128,16 @@ impl Model {
         //     0,
         // );
         let (q_values, _) = self.policy.forward(obs_batch); // [B, action_size]
-        let (next_q_values, _) = self.target.valid().forward(next_obs_batch.inner()); // [B, action_size]
+        let (next_q_online, _) = self.policy.forward(next_obs_batch.clone());
 
-        let inner_device = next_obs_batch_inner.device();
+        let next_actions = next_q_online.detach().argmax(1);
+
+        let (next_q_target, _) = self.target.valid().forward(next_obs_batch.inner()); // [B, action_size]
+        let next_q_target = Tensor::<Backend, 2>::from_inner(next_q_target);
+
+        // Bellman: Q(s,a) = r + gamma * max(Q(s', a')) * (1 - done)
+        let max_next_q = next_q_target.gather(1, next_actions).squeeze_dim(1);
+        // let inner_device = next_obs_batch_inner.device();
 
         let rewards: Vec<f32> = batch.iter().map(|t| t.reward).collect();
         let dones: Vec<f32> = batch
@@ -144,20 +145,15 @@ impl Model {
             .map(|t| if t.done { 1.0 } else { 0.0 })
             .collect();
 
-        let rewards_tensor = Tensor::<InnerBackend, 1>::from_data(
-            TensorData::new(rewards, [batch_size]),
-            &inner_device,
-        );
-        let dones_tensor = Tensor::<InnerBackend, 1>::from_data(
-            TensorData::new(dones, [batch_size]),
-            &inner_device,
-        );
+        let rewards_tensor =
+            Tensor::<Backend, 1>::from_data(TensorData::new(rewards, [batch_size]), &self.device);
+        let dones_tensor =
+            Tensor::<Backend, 1>::from_data(TensorData::new(dones, [batch_size]), &self.device);
 
-        // Bellman: Q(s,a) = r + gamma * max(Q(s', a')) * (1 - done)
-        let max_next_q = next_q_values.max_dim(1).squeeze_dim(1); // [B]
-        let target_q: Tensor<InnerBackend, 1> =
-            rewards_tensor + max_next_q * (1.0 - dones_tensor) * 0.99;
-        let target_q = Tensor::<Backend, 1>::from_inner(target_q);
+        let target_q =
+            (rewards_tensor + max_next_q.detach() * (dones_tensor.neg() + 1.0) * 0.99).detach();
+
+        // let target_q = Tensor::<Backend, 1>::from_inner(target_q);
 
         // select Q values for actions taken
         let actions: Vec<i32> = batch.iter().map(|t| t.action as i32).collect();
@@ -173,6 +169,8 @@ impl Model {
         let loss: Tensor<Backend, 1> = (selected_q - target_q.detach()).powf_scalar(2.0).mean();
         self.last_loss = loss.clone().into_scalar();
 
+        // NOTE: might need a is_nan / is_infinite check here for last_loss
+
         let grads = loss.backward();
         let grads = GradientsParams::from_grads(grads, &self.policy);
         self.policy = self.optim.step(1e-4, self.policy.clone(), grads);
@@ -184,17 +182,39 @@ impl Model {
         }
     }
 
+    pub fn initialise_games(&mut self) {
+        // for i in 0..self.games.len() {
+        //     let action: usize =
+        //         rand::rng().random_range(0..self.games[i].width * self.games[i].height);
+        //     // let action = (self.games[i].height / 2) * self.games[i].width + (self.games[i].width / 2);
+        //     self.games[i].generate_bombs(action);
+        //     self.games[i].bombs_generated = true;
+        //     self.games[i].step(action);
+        // }
+        for i in 0..self.games.len() {
+            self.initialise_game(i);
+        }
+    }
+
+    pub fn initialise_game(&mut self, idx: usize) {
+        let action: usize = rand::rng().random_range(0..self.games[idx].width * self.games[idx].height);
+        // let action = (self.games[i].height / 2) * self.games[i].width + (self.games[i].width / 2);
+        self.games[idx].generate_bombs(action);
+        self.games[idx].bombs_generated = true;
+        self.games[idx].step(action);
+    }
+
     pub fn train_step(&mut self) {
         for i in 0..self.games.len() {
-            if !self.games[i].bombs_generated {
-                let action: usize =
-                    rand::rng().random_range(0..self.games[i].width * self.games[i].height);
-                // let action = (self.games[i].height / 2) * self.games[i].width + (self.games[i].width / 2);
-                self.games[i].generate_bombs(action);
-                self.games[i].bombs_generated = true;
-                self.games[i].step(action);
-                return;
-            }
+            // if !self.games[i].bombs_generated {
+            //     let action: usize =
+            //         rand::rng().random_range(0..self.games[i].width * self.games[i].height);
+            //     // let action = (self.games[i].height / 2) * self.games[i].width + (self.games[i].width / 2);
+            //     self.games[i].generate_bombs(action);
+            //     self.games[i].bombs_generated = true;
+            //     self.games[i].step(action);
+            //     return;
+            // }
 
             let obs = self.games[i].to_observation();
             // let obs_tensor = obs_to_tensor(&obs, &self.device);
@@ -212,7 +232,7 @@ impl Model {
             // NOTE: PPO
             // let logits = logits.squeeze_dim(0);
 
-            // let action_size = self.games[i].width * self.games[i].height;
+            let action_size = self.games[i].width * self.games[i].height;
             //
             // let mask_vec = self.games[i].action_mask();
             // let mask_tensor = Tensor::<Backend, 1>::from_data(
@@ -265,29 +285,33 @@ impl Model {
                     .map(|(i, _)| i)
                     .collect();
                 // println!("{}", valid.len());
-                // if valid.is_empty() {
-                //     self.episode_count += 1;
-                //     self.games[i].reset();
-                //     self.step_count = 0;
-                //     self.tx
-                //         .send(Metric::EpisodeDone {
-                //             episode: self.episode_count,
-                //             total_reward: self.last_total_reward,
-                //             steps: self.last_steps,
-                //             win: self.last_win,
-                //             loss: self.last_loss,
-                //         })
-                //         .ok();
-                //     continue;
-                // }
+                if valid.is_empty() {
+                    self.episode_count += 1;
+                    self.games[i].reset();
+                    self.step_count = 0;
+
+                    self.initialise_game(i);
+
+                    self.tx
+                        .send(Metric::EpisodeDone {
+                            episode: self.episode_count,
+                            total_reward: self.last_total_reward,
+                            steps: self.last_steps,
+                            win: self.last_win,
+                            loss: self.last_loss,
+                        })
+                        .ok();
+                    continue;
+                }
                 valid[rand::rng().random_range(0..valid.len())]
             } else {
                 // mask Q values and take argmax
                 let mask = self.games[i].action_mask();
                 let mask_tensor = Tensor::<InnerBackend, 1>::from_data(
-                    TensorData::new(mask, [self.games[i].width * self.games[i].height]),
+                    TensorData::new(mask, [action_size]),
                     &self.device,
                 );
+                // let q_values_1d = q_values.reshape([action_size]);
                 let masked_q = q_values.squeeze_dim(0) + (mask_tensor - 1.0) * 1e9;
                 masked_q.argmax(0).into_scalar() as usize
             };
@@ -365,6 +389,8 @@ impl Model {
                 self.episode_rewards[i] = 0.0;
                 self.games[i].reset();
                 // self.step_count = 0;
+
+                self.initialise_game(i);
 
                 self.tx
                     .send(Metric::EpisodeDone {
@@ -511,15 +537,15 @@ fn obs_to_vec(obs: &Observation) -> Vec<f32> {
     v
 }
 
-fn obs_to_tensor(obs: &Observation, device: &Device<Backend>) -> Tensor<Backend, 4> {
-    let mut input: Vec<f32> = Vec::new();
-    input.extend(&obs.hidden);
-    input.extend(&obs.revealed);
-    input.extend(&obs.hints.iter().map(|h| h / 8.0).collect::<Vec<_>>());
-    // println!("obs height={} width={}", obs.height, obs.width);
-    let data = TensorData::new(input, [1, 3, obs.height, obs.width]);
-    Tensor::<Backend, 4>::from_floats(data, device)
-}
+// fn obs_to_tensor(obs: &Observation, device: &Device<Backend>) -> Tensor<Backend, 4> {
+//     let mut input: Vec<f32> = Vec::new();
+//     input.extend(&obs.hidden);
+//     input.extend(&obs.revealed);
+//     input.extend(&obs.hints.iter().map(|h| h / 8.0).collect::<Vec<_>>());
+//     // println!("obs height={} width={}", obs.height, obs.width);
+//     let data = TensorData::new(input, [1, 3, obs.height, obs.width]);
+//     Tensor::<Backend, 4>::from_floats(data, device)
+// }
 
 pub fn load_model(tx: Sender<Metric>) -> Model {
     println!("loading model");
