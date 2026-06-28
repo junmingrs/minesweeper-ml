@@ -1,4 +1,4 @@
-use std::{path::Path, sync::mpsc::Sender};
+use std::{fs::read_to_string, path::Path, sync::mpsc::Sender};
 
 use bevy::ecs::resource::Resource;
 use burn::{
@@ -197,11 +197,53 @@ impl Model {
     }
 
     pub fn initialise_game(&mut self, idx: usize) {
-        let action: usize = rand::rng().random_range(0..self.games[idx].width * self.games[idx].height);
+        let action: usize =
+            rand::rng().random_range(0..self.games[idx].width * self.games[idx].height);
         // let action = (self.games[i].height / 2) * self.games[i].width + (self.games[i].width / 2);
         self.games[idx].generate_bombs(action);
         self.games[idx].bombs_generated = true;
         self.games[idx].step(action);
+    }
+
+    pub fn warmup(&mut self, steps: usize) {
+        let mut warmed = 0;
+        while warmed < steps {
+            for i in 0..self.games.len() {
+                let mask = self.games[i].action_mask();
+                let valid: Vec<usize> = mask
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, m)| **m == 1.0)
+                    .map(|(i, _)| i)
+                    .collect();
+
+                if valid.is_empty() {
+                    self.games[i].reset();
+                    self.initialise_game(i);
+                    continue;
+                }
+
+                let action = valid[rand::rng().random_range(0..valid.len())];
+                let obs_vec = obs_to_vec(&self.games[i].to_observation());
+                let result = self.games[i].step(action);
+                let next_obs_vec = obs_to_vec(&self.games[i].to_observation());
+
+                self.replay_buffer.push(Transition {
+                    obs: obs_vec,
+                    action,
+                    reward: result.reward,
+                    next_obs: next_obs_vec,
+                    done: result.done,
+                });
+
+                if result.done {
+                    self.games[i].reset();
+                    self.initialise_game(i);
+                }
+
+                warmed += 1;
+            }
+        }
     }
 
     pub fn train_step(&mut self) {
@@ -332,7 +374,7 @@ impl Model {
             self.step_count += 1;
             self.games[i].step_count += 1;
             // learn every step once buffer is warm
-            if self.replay_buffer.len() >= 256 && self.step_count.is_multiple_of(4) {
+            if self.replay_buffer.len() >= 128 && self.step_count.is_multiple_of(4) {
                 self.train_on_batch(256);
             }
 
@@ -562,6 +604,10 @@ pub fn load_model(tx: Sender<Metric>) -> Model {
     let target = Policy::new(&device, height, width, action_size)
         .load_file(Path::new("model_fcn_dqn"), &recorder, &device)
         .unwrap();
+    let step_count = read_to_string("step_count.txt")
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0);
     Model {
         games: (0..num_games)
             .map(|_| Game::new(height, width, 5))
@@ -574,7 +620,7 @@ pub fn load_model(tx: Sender<Metric>) -> Model {
         optim: AdamConfig::new().init(),
         tx,
         target_update_freq: 1000,
-        step_count: 0,
+        step_count,
         episode_count: 0,
         episode_rewards: (0..num_games).map(|_| 0.0).collect(),
         last_win: false,
@@ -584,11 +630,12 @@ pub fn load_model(tx: Sender<Metric>) -> Model {
     }
 }
 
-pub fn save_model(policy: &Policy<Backend>) {
+pub fn save_model(policy: &Policy<Backend>, step_count: usize) {
     let recorder = NamedMpkFileRecorder::<FullPrecisionSettings>::new();
     policy
         .clone()
         .save_file(Path::new("model_fcn_dqn"), &recorder)
         .unwrap();
+    std::fs::write("step_count.txt", step_count.to_string()).unwrap();
     println!("Model saved");
 }

@@ -33,12 +33,13 @@ fn main() {
     // });
 
     model.initialise_games();
+    model.warmup(10_000);
 
     loop {
         model.train_step();
         match cmd_rx.try_recv() {
             Ok(_) => {
-                save_model(&model.policy);
+                save_model(&model.policy, model.step_count);
             }
             Err(_) => {
                 // println!("could not save model!");
