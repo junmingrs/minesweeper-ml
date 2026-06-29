@@ -52,13 +52,13 @@ impl Environment for Game {
                         nearby_revealed_cells += 1.0;
                     };
                 }
-                (0.1 * n * nearby_revealed_cells, false)
+                (0.3 * n * nearby_revealed_cells, false)
             }
             // ActionOutcome::FlagPlaced => (-0.02, false),
             // ActionOutcome::FlagRemoved => (-0.5, false),
             ActionOutcome::Invalid => (-0.5, false),
             ActionOutcome::HitBomb => (-1.0, true),
-            ActionOutcome::Win => (5.0, true),
+            ActionOutcome::Win => (10.0, true),
         };
 
         StepResult {

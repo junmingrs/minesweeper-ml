@@ -57,15 +57,16 @@ impl Model {
 
         let height = 5; // 20
         let width = 5; // 10
+        let num_bombs = 5;
         let action_size = width * height;
 
         Model {
             games: (0..num_games)
-                .map(|_| Game::new(height, width, 5))
+                .map(|_| Game::new(height, width, num_bombs))
                 .collect(),
             policy: Policy::new(&device, height, width, action_size),
             target: Policy::new(&device, height, width, action_size),
-            replay_buffer: ReplayBuffer::new(50_000),
+            replay_buffer: ReplayBuffer::new(200_000),
             device,
             // transitions: (0..num_games).map(|_| Vec::new()).collect(),
             optim: AdamConfig::new().init(),
@@ -173,11 +174,12 @@ impl Model {
 
         let grads = loss.backward();
         let grads = GradientsParams::from_grads(grads, &self.policy);
-        self.policy = self.optim.step(1e-4, self.policy.clone(), grads);
+        let lr = if self.step_count < 500_000 { 3e-4 } else { 1e-4 };
+        self.policy = self.optim.step(lr, self.policy.clone(), grads);
 
         // periodically sync target network
         self.step_count += 1;
-        if self.step_count % self.target_update_freq == 0 {
+        if self.step_count.is_multiple_of(self.target_update_freq) {
             self.target = self.policy.clone();
         }
     }
@@ -596,6 +598,7 @@ pub fn load_model(tx: Sender<Metric>) -> Model {
     let num_games = 8;
     let height = 5;
     let width = 5;
+    let num_bombs = 5;
     // let action_size = 2 * width * height;
     let action_size = width * height;
     let policy = Policy::new(&device, height, width, action_size)
@@ -610,12 +613,12 @@ pub fn load_model(tx: Sender<Metric>) -> Model {
         .unwrap_or(0);
     Model {
         games: (0..num_games)
-            .map(|_| Game::new(height, width, 5))
+            .map(|_| Game::new(height, width, num_bombs))
             .collect(),
         policy,
         target,
         device,
-        replay_buffer: ReplayBuffer::new(50_000),
+        replay_buffer: ReplayBuffer::new(200_000),
         // transitions: (0..num_games).map(|_| Vec::new()).collect(),
         optim: AdamConfig::new().init(),
         tx,

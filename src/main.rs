@@ -5,6 +5,7 @@ use std::{
 };
 
 use crate::{
+    // bevy::run_bevy,
     ml::model::{Model, load_model, save_model},
     tui::{Command, Metric, run_tui},
 };
@@ -23,14 +24,15 @@ fn main() {
     } else {
         Model::new(tx)
     };
+    // spawn(move || {
+    //     run_bevy(model, cmd_rx);
+    // });
 
     spawn(move || {
         run_tui(rx, cmd_tx).unwrap();
     });
 
-    // spawn(move || {
-    //     run_bevy(model, cmd_rx);
-    // });
+    // run_bevy(model, cmd_rx);
 
     model.initialise_games();
     model.warmup(10_000);

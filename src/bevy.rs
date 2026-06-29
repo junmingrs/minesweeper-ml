@@ -61,7 +61,7 @@ pub fn run_bevy(model: Model, cmd_rx: Receiver<Command>) {
 fn handle_commands(model: Res<Model>, cmd_rx: Res<CommandReceiver>) {
     if let Ok(cmd) = cmd_rx.0.lock().unwrap().try_recv() {
         match cmd {
-            Command::Save => save_model(&model.policy),
+            Command::Save => save_model(&model.policy, model.step_count),
         }
     }
 }
@@ -70,8 +70,10 @@ fn train_model(mut model: ResMut<Model>) {
     model.train_step();
 }
 
-fn setup(mut commands: Commands, model: Res<Model>) {
+fn setup(mut commands: Commands, mut model: ResMut<Model>) {
     commands.spawn(Camera2d);
+    model.initialise_games();
+    model.warmup(10_000);
     commands
         .spawn((
             Node {
